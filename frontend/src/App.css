@@ -1,0 +1,353 @@
+/* Custom scrollbar for webkit browsers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Loading spinner animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* File upload drag and drop styles */
+.drag-active {
+  border-color: #3b82f6 !important;
+  background-color: #eff6ff !important;
+}
+
+/* Table responsive scroll */
+.table-container {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Group card hover effects */
+.group-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.group-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Custom button styles */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #2563eb;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+}
+
+.btn-primary:hover {
+  background-color: #1d4ed8;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #e5e7eb;
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+}
+
+.btn-secondary:hover {
+  background-color: #d1d5db;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #dc2626;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+}
+
+.btn-danger:hover {
+  background-color: #b91c1c;
+}
+
+/* Status badge styles */
+.status-uploaded {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.status-processing {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.status-completed {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-error {
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Card styles */
+.card {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e5e7eb;
+}
+
+.card-header {
+  padding: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.card-content {
+  padding: 1rem;
+}
+
+/* Responsive table styles */
+@media (max-width: 768px) {
+  .table-responsive {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .table-responsive table {
+    min-width: 600px;
+  }
+}
+
+/* Grid layout adjustments */
+@media (max-width: 1024px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .file-list {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+}
+
+/* Text truncation utility */
+.truncate-long {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Analysis results animations */
+.analysis-enter {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.analysis-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms, transform 300ms;
+}
+
+/* Custom focus styles */
+.focus-ring:focus {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #3b82f6;
+}
+
+/* Progress bar styles */
+.progress-bar {
+  height: 4px;
+  background-color: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: #3b82f6;
+  transition: width 0.3s ease;
+}
+
+/* Tooltip styles */
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  width: 120px;
+  background-color: #374151;
+  color: white;
+  text-align: center;
+  border-radius: 4px;
+  padding: 5px;
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -60px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 12px;
+}
+
+/* Empty state styles */
+.empty-state {
+  text-align: center;
+  padding: 3rem 0;
+}
+
+.empty-state-icon {
+  margin: 0 auto;
+  height: 3rem;
+  width: 3rem;
+  color: #d1d5db;
+  margin-bottom: 1rem;
+}
+
+.empty-state-title {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: #111827;
+  margin-bottom: 0.5rem;
+}
+
+.empty-state-description {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+/* Chat message styles */
+.chat-message {
+  max-width: 80%;
+  word-wrap: break-word;
+}
+
+.chat-message img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+/* Chart container styles */
+.chart-container {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Loading states */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+/* Enhanced hover effects */
+.hover-lift {
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+/* Success animations */
+@keyframes checkmark {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.checkmark {
+  stroke-dasharray: 100;
+  animation: checkmark 0.5s ease-in-out;
+}
+
+/* File upload animations */
+.upload-enter {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.upload-enter-active {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 300ms, transform 300ms;
+}
+
+/* Gradient backgrounds for statistics */
+.stat-gradient-blue {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stat-gradient-green {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stat-gradient-purple {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stat-gradient-orange {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
