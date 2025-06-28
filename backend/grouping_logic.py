@@ -187,7 +187,7 @@ class ProductGroupingEngine:
         words2 = set(name2.split())
         if words1 and words2:
             word_overlap = len(words1.intersection(words2)) / len(words1.union(words2))
-            else:
+        else:
             word_overlap = 0.0
         
         # Category similarity (if available)
@@ -460,7 +460,7 @@ class ProductGroupingEngine:
         
         if common_words:
             return ' '.join(common_words[:2]).title()
-            else:
+        else:
             # Fallback to first item's key word
             first_name = names[0]
             words = [w for w in first_name.split() if len(w) > 2]

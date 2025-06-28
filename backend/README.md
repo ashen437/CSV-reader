@@ -22,6 +22,8 @@ python start_server.py
 ### Method 2: Using uvicorn directly
 ```bash
 cd backend
+python -m venv venv
+.\venv\Scripts\Activate 
 pip install -r requirements.txt
 uvicorn server:app --reload --port 8000
 ```
