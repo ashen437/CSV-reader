@@ -9,9 +9,68 @@ body {
         "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Improve touch scrolling on mobile */
+    -webkit-overflow-scrolling: touch;
+    /* Prevent text selection on mobile when tapping buttons */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+/* Allow text selection in input fields and content areas */
+input, textarea, [contenteditable] {
+    -webkit-user-select: text;
+    -khtml-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+
+/* Allow text selection in message content */
+.message-content {
+    -webkit-user-select: text;
+    -khtml-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
 }
 
 code {
     font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
         monospace;
+}
+
+/* Mobile-specific optimizations */
+@media (max-width: 1024px) {
+    /* Improve touch target sizes */
+    button, a, [role="button"] {
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    /* Smooth scrolling for mobile */
+    * {
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Prevent zoom on input focus on iOS */
+    input[type="text"], 
+    input[type="email"], 
+    input[type="password"], 
+    textarea {
+        font-size: 16px;
+    }
+}
+
+/* Custom utility classes for mobile touch interactions */
+.touch-manipulation {
+    touch-action: manipulation;
+}
+
+/* Prevent pull-to-refresh on mobile when scrolling */
+.no-overscroll {
+    overscroll-behavior: none;
 }
