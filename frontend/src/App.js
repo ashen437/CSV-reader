@@ -1,55 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import NavigationBar from './components/NavigationBar';
-import NavigationErrorBoundary from './components/NavigationErrorBoundary';
+import { useDocumentContext } from './contexts/DocumentContext';
 import './App.css';
 
 const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
 function App() {
   const navigate = useNavigate();
+  const { selectDocument, selectedDocument } = useDocumentContext();
   const [files, setFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
-  const [selectedFile, setSelectedFile] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
   const [previewData, setPreviewData] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [activeTab, setActiveTab] = useState('analysis'); // 'analysis', 'chat'
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('analysis'); // Only 'analysis' tab now
   
-  const chatEndRef = useRef(null);
+  // Short-term memory for analysis results (cleared when app closes)
+  const [analysisMemory, setAnalysisMemory] = useState(new Map());
 
   // Fetch files on component mount
   useEffect(() => {
     fetchFiles();
   }, []);
-
-  // Scroll to bottom of chat when new messages are added
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
-  // Load chat history when file is selected
-  useEffect(() => {
-    if (selectedFile && activeTab === 'chat') {
-      loadChatHistory(selectedFile.file_id);
-    }
-  }, [selectedFile, activeTab]);
-
-  // Function to load chat history
-  const loadChatHistory = async (fileId) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/chat-history/${fileId}`);
-      const history = await response.json();
-      setChatMessages(history.messages || []);
-    } catch (error) {
-      console.error('Error loading chat history:', error);
-      setChatMessages([]);
-    }
-  };
 
   const fetchFiles = async () => {
     try {
@@ -58,77 +31,6 @@ function App() {
       setFiles(data);
     } catch (error) {
       console.error('Error fetching files:', error);
-    }
-  };
-
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || !selectedFile) return;
-
-    const userMessage = {
-      message: chatInput,
-      sender: 'user',
-      timestamp: new Date().toISOString()
-    };
-
-    setChatMessages(prev => [...prev, userMessage]);
-    const currentInput = chatInput;
-    setChatInput('');
-    setIsChatLoading(true);
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/chat/${selectedFile.file_id}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: currentInput, file_id: selectedFile.file_id }),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const aiMessage = {
-          message: result.response,
-          sender: 'ai',
-          timestamp: new Date().toISOString(),
-          chart_data: result.chart_data,
-          chart_type: result.chart_type
-        };
-        setChatMessages(prev => [...prev, aiMessage]);
-      } else {
-        const error = await response.json();
-        const errorMessage = {
-          message: `Error: ${error.detail}`,
-          sender: 'ai',
-          timestamp: new Date().toISOString()
-        };
-        setChatMessages(prev => [...prev, errorMessage]);
-      }
-    } catch (error) {
-      console.error('Chat error:', error);
-      const errorMessage = {
-        message: 'Sorry, I encountered an error processing your request.',
-        sender: 'ai',
-        timestamp: new Date().toISOString()
-      };
-      setChatMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  const handleClearChat = async () => {
-    if (!selectedFile) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/chat-history/${selectedFile.file_id}`, {
-        method: 'DELETE',
-      });
-      
-      if (response.ok) {
-        setChatMessages([]);
-      }
-    } catch (error) {
-      console.error('Error clearing chat:', error);
     }
   };
 
@@ -187,11 +89,17 @@ function App() {
   };
 
   const handleFileSelect = async (file) => {
-    setSelectedFile(file);
-    setAnalysisData(null);
+    // Use DocumentContext to select the file
+    await selectDocument(file);
     setPreviewData(null);
-    setChatMessages([]);
     setActiveTab('analysis'); // Reset to analysis tab
+
+    // Check if we have analysis results in memory first
+    if (analysisMemory.has(file.file_id)) {
+      setAnalysisData(analysisMemory.get(file.file_id));
+    } else {
+      setAnalysisData(null);
+    }
 
     // Fetch file preview
     try {
@@ -202,11 +110,13 @@ function App() {
       console.error('Error fetching preview:', error);
     }
 
-    // Check if analysis exists
-    if (file.status === 'completed') {
+    // Only fetch from server if not in memory and status is completed
+    if (!analysisMemory.has(file.file_id) && file.status === 'completed') {
       try {
         const response = await fetch(`${API_BASE_URL}/api/analysis/${file.file_id}`);
         const analysis = await response.json();
+        // Store in memory for future use
+        setAnalysisMemory(prev => new Map(prev).set(file.file_id, analysis));
         setAnalysisData(analysis);
       } catch (error) {
         console.error('Error fetching analysis:', error);
@@ -223,7 +133,9 @@ function App() {
 
       if (response.ok) {
         const result = await response.json();
+        // Store in both current state and memory
         setAnalysisData(result);
+        setAnalysisMemory(prev => new Map(prev).set(fileId, result));
         fetchFiles(); // Refresh to update status
       } else {
         const error = await response.json();
@@ -246,8 +158,15 @@ function App() {
 
         if (response.ok) {
           fetchFiles();
-          if (selectedFile && selectedFile.file_id === fileId) {
-            setSelectedFile(null);
+          // Remove from analysis memory
+          setAnalysisMemory(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(fileId);
+            return newMap;
+          });
+          
+          if (selectedDocument && selectedDocument.file_id === fileId) {
+            await selectDocument(null);
             setAnalysisData(null);
             setPreviewData(null);
           }
@@ -259,21 +178,23 @@ function App() {
     }
   };
 
-  const handleProcessingAIGroups = () => {
-    if (!selectedFile) {
+    const handleProcessingAIGroups = () => {
+    if (!selectedDocument) {
       alert('Please select a file first');
       return;
     }
     
-    console.log('Navigating to group configuration for file:', selectedFile.file_id);
-    
+    console.log('Navigating to group configuration for file:', selectedDocument.file_id);
+
     try {
       // Navigate to the new configuration preview page
-      navigate(`/configure-groups/${selectedFile.file_id}`);
+      navigate(`/configure-groups/${selectedDocument.file_id}`);
+      // Scroll to top after navigation
+      setTimeout(() => window.scrollTo(0, 0), 100);
     } catch (error) {
-      console.error('Navigate error:', error);
-      // Fallback to window.location for testing
-      window.location.href = `/configure-groups/${selectedFile.file_id}`;
+      console.error('Navigation error:', error);
+      // Fallback to direct navigation
+      window.location.href = `/configure-groups/${selectedDocument.file_id}`;
     }
   };
 
@@ -288,11 +209,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <NavigationErrorBoundary>
-        <NavigationBar />
-      </NavigationErrorBoundary>
-      
+    <div className="min-h-screen bg-gray-50 pt-16">
       {/* Page Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -378,7 +295,7 @@ function App() {
                     <div
                       key={file.file_id}
                       className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors ${
-                        selectedFile?.file_id === file.file_id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                        selectedDocument?.file_id === file.file_id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
                       }`}
                       onClick={() => handleFileSelect(file)}
                     >
@@ -395,6 +312,7 @@ function App() {
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(file.status)}`}>
                             {file.status}
                           </span>
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -404,15 +322,6 @@ function App() {
                           >
                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => navigate(`/configure-groups/${file.file_id}`)}
-                            className="p-1 text-gray-400 hover:text-blue-600 focus:outline-none"
-                            title="Configure AI Groups"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                              <path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
                             </svg>
                           </button>
                         </div>
@@ -426,7 +335,7 @@ function App() {
 
           {/* Right Panel - File Details & Analysis */}
           <div className="lg:col-span-2">
-            {!selectedFile ? (
+            {!selectedDocument ? (
               <div className="bg-white rounded-lg shadow-sm border h-full flex items-center justify-center">
                 <div className="text-center text-gray-500">
                   <svg className="mx-auto h-16 w-16 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -444,26 +353,14 @@ function App() {
                   <div className="p-4 border-b">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h2 className="text-lg font-semibold text-gray-900">{selectedFile.filename}</h2>
+                        <h2 className="text-lg font-semibold text-gray-900">{selectedDocument.filename}</h2>
                         <p className="text-sm text-gray-600">
-                          {selectedFile.total_rows} rows • {selectedFile.columns?.length} columns
+                          {selectedDocument.total_rows} rows • {selectedDocument.columns?.length} columns
                         </p>
                       </div>
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(selectedFile.status)}`}>
-                        {selectedFile.status}
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(selectedDocument.status)}`}>
+                        {selectedDocument.status}
                       </span>
-                      {selectedFile.status === 'completed' && (
-                        <button
-                          onClick={handleProcessingAIGroups}
-                          className="inline-flex items-center px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
-                        >
-                          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          Configure AI Groups
-                        </button>
-                      )}
                     </div>
                     
                     {/* Tab Navigation */}
@@ -485,22 +382,17 @@ function App() {
                       </button>
                       <button
                         onClick={() => {
-                          setActiveTab('chat');
-                          if (selectedFile) {
-                            loadChatHistory(selectedFile.file_id);
-                          }
+                          navigate(`/configure-groups/${selectedDocument.file_id}`);
+                          setTimeout(() => window.scrollTo(0, 0), 100);
                         }}
-                        className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                          activeTab === 'chat'
-                            ? 'bg-white text-blue-600 shadow-sm'
-                            : 'text-gray-600 hover:text-gray-900'
-                        }`}
+                        className="flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                       >
                         <div className="flex items-center justify-center space-x-2">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
-                          <span>AI Q&A Chat</span>
+                          <span>Configure AI Groups</span>
                         </div>
                       </button>
                     </div>
@@ -548,11 +440,11 @@ function App() {
                             <h3 className="text-sm font-medium text-gray-900">Procurement Analysis</h3>
                             <p className="text-xs text-gray-600">Generate AI-powered bulk procurement groupings</p>
                           </div>
-                          {selectedFile.status === 'uploaded' && (
+                          {!analysisMemory.has(selectedDocument.file_id) && selectedDocument.status === 'uploaded' && (
                             <button
-                              onClick={() => handleAnalyze(selectedFile.file_id)}
+                              onClick={() => handleAnalyze(selectedDocument.file_id)}
                               disabled={isAnalyzing}
-                              className="inline-flex items-center px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {isAnalyzing ? (
                                 <>
@@ -565,135 +457,37 @@ function App() {
                               ) : (
                                 <>
                                   <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                                   </svg>
-                                  Configure AI Groups
+                                  Start Analysis
                                 </>
                               )}
                             </button>
                           )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'chat' && (
-                    <div className="h-96 flex flex-col">
-                      {/* Chat Header */}
-                      <div className="p-4 border-b bg-gray-50">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="text-sm font-medium text-gray-900">Ask questions about your data</h3>
-                            <p className="text-xs text-gray-600">You can ask for statistics, charts, or general questions about the CSV content</p>
-                          </div>
-                          <button
-                            onClick={handleClearChat}
-                            className="text-sm text-gray-500 hover:text-red-600 flex items-center space-x-1"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                            <span>Clear</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Chat Messages */}
-                      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                        {chatMessages.length === 0 ? (
-                          <div className="text-center text-gray-500 py-8">
-                            <svg className="mx-auto h-12 w-12 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                            </svg>
-                            <p className="text-sm font-medium">Start a conversation</p>
-                            <p className="text-xs text-gray-400 mt-1">Ask questions like "What's the average price?" or "Show me a chart of categories"</p>
-                          </div>
-                        ) : (
-                          chatMessages.map((msg, index) => (
-                            <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                                msg.sender === 'user' 
-                                  ? 'bg-blue-600 text-white' 
-                                  : 'bg-gray-100 text-gray-900'
-                              }`}>
-                                <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
-                                {msg.chart_data && msg.chart_type === 'image_url' && (
-                                  <div className="mt-2">
-                                    <img 
-                                      src={msg.chart_data} 
-                                      alt="Generated chart" 
-                                      className="max-w-full h-auto rounded border"
-                                      onError={(e) => {
-                                        e.target.style.display = 'none';
-                                      }}
-                                    />
-                                  </div>
-                                )}
-                                <p className="text-xs opacity-75 mt-1">
-                                  {new Date(msg.timestamp).toLocaleTimeString()}
-                                </p>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                        {isChatLoading && (
-                          <div className="flex justify-start">
-                            <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg">
-                              <div className="flex items-center space-x-2">
-                                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span className="text-sm">AI is thinking...</span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        <div ref={chatEndRef} />
-                      </div>
-
-                      {/* Chat Input */}
-                      <div className="p-4 border-t">
-                        <div className="flex space-x-2">
-                          <input
-                            type="text"
-                            value={chatInput}
-                            onChange={(e) => setChatInput(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                            placeholder="Ask a question about your data..."
-                            className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                            disabled={isChatLoading}
-                          />
-                          <button
-                            onClick={handleSendMessage}
-                            disabled={!chatInput.trim() || isChatLoading}
-                            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                          </button>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <button
-                            onClick={() => setChatInput("What are the main categories in this data?")}
-                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded-md"
-                          >
-                            Categories overview
-                          </button>
-                          <button
-                            onClick={() => setChatInput("Show me a bar chart of the data")}
-                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded-md"
-                          >
-                            Create chart
-                          </button>
-                          <button
-                            onClick={() => setChatInput("What's the average price?")}
-                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded-md"
-                          >
-                            Average price
-                          </button>
+                          {analysisMemory.has(selectedDocument.file_id) && (
+                            <button
+                              onClick={() => handleAnalyze(selectedDocument.file_id)}
+                              disabled={isAnalyzing}
+                              className="inline-flex items-center px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isAnalyzing ? (
+                                <>
+                                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  Re-analyzing...
+                                </>
+                              ) : (
+                                <>
+                                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                  Re-analyze
+                                </>
+                              )}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -704,8 +498,20 @@ function App() {
                 {activeTab === 'analysis' && analysisData && (
                   <div className="bg-white rounded-lg shadow-sm border">
                     <div className="p-4 border-b">
-                      <h2 className="text-lg font-semibold text-gray-900">AI Analysis Results</h2>
-                      <p className="text-sm text-gray-600">Bulk procurement optimization groupings</p>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">AI Analysis Results</h2>
+                          <p className="text-sm text-gray-600">Bulk procurement optimization groupings</p>
+                        </div>
+                        {analysisMemory.has(selectedDocument.file_id) && (
+                          <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full">
+                            <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
+                            </svg>
+                            Cached
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
                     {/* Summary Stats */}

@@ -6,6 +6,8 @@ import App from "./App";
 import GroupManagement from "./components/GroupManagement";
 import GroupConfigurationPreview from "./components/GroupConfigurationPreview";
 import ChartsPage from "./components/ChartsPage";
+import NavigationBar from "./components/NavigationBar";
+import NavigationErrorBoundary from "./components/NavigationErrorBoundary";
 import { DocumentProvider } from "./contexts/DocumentContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -14,7 +16,10 @@ root.render(
   <React.StrictMode>
     <ErrorBoundary>
       <DocumentProvider>
-        <Router>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <NavigationErrorBoundary>
+            <NavigationBar />
+          </NavigationErrorBoundary>
           <Routes>
             <Route path="/" element={<App />} />
             <Route path="/charts" element={<ChartsPage />} />

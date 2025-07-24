@@ -245,17 +245,24 @@ const ChatInterface = () => {
   }
 
   return (
-    <div className="h-full flex flex-col bg-white no-overscroll">
+    <div className="h-full flex flex-col bg-gray-50 no-overscroll">
       {/* Chat Header */}
-      <div className="flex-shrink-0 px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-200 bg-gray-50">
+      <div className="flex-shrink-0 px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-200 bg-white">
         <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
-              {selectedDocument.filename}
-            </h2>
-            <p className="text-xs sm:text-sm text-gray-600 truncate">
-              {selectedDocument.total_rows.toLocaleString()} rows • Ask questions about your data
-            </p>
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
+                CSV Assistant
+              </h2>
+              <p className="text-xs sm:text-sm text-gray-600 truncate">
+                Analyzing {selectedDocument.filename} • {selectedDocument.total_rows.toLocaleString()} rows
+              </p>
+            </div>
           </div>
           <div className="flex items-center space-x-1 sm:space-x-2 flex-shrink-0 ml-2">
             <div className={`w-2 h-2 rounded-full ${
@@ -267,7 +274,7 @@ const ChatInterface = () => {
               'Connecting to server...'
             }></div>
             <span className="text-xs text-gray-600 hidden sm:inline">
-              {connectionStatus === 'connected' ? 'Ready' :
+              {connectionStatus === 'connected' ? 'Online' :
                connectionStatus === 'error' ? 'Error' : 
                connectionStatus === 'disconnected' ? 'Offline' : 'Connecting...'}
             </span>
@@ -276,81 +283,135 @@ const ChatInterface = () => {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4 space-y-3 sm:space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {messages.length === 0 ? (
-          <div className="text-center text-gray-500 py-8 sm:py-12">
-            <div className="mb-4">
-              <svg className="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
+          <div className="text-center text-gray-500 py-12 sm:py-16">
+            <div className="mb-6">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
             </div>
-            <h3 className="text-sm font-medium text-gray-900 mb-2">Start a conversation</h3>
-            <p className="text-xs text-gray-500 mb-4 px-4">
-              Ask questions like "What's the average price?" or "Show me a chart of categories"
+            <h3 className="text-xl font-semibold text-gray-900 mb-3">How can I help with your data today?</h3>
+            <p className="text-sm text-gray-600 mb-6 max-w-md mx-auto">
+              I can analyze your CSV data, create charts, provide statistics, and answer questions about patterns in your dataset.
             </p>
-            <div className="text-xs text-gray-400 space-y-1 px-4">
-              <p>• Request data analysis and statistics</p>
-              <p>• Generate charts and visualizations</p>
-              <p>• Ask about specific data patterns</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto text-sm">
+              <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors cursor-pointer" 
+                   onClick={() => setChatInput("What's the summary of this dataset?")}>
+                <div className="flex items-center space-x-2 text-gray-700">
+                  <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  <span>Summarize the data</span>
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors cursor-pointer"
+                   onClick={() => setChatInput("Show me a chart of the data")}>
+                <div className="flex items-center space-x-2 text-gray-700">
+                  <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Create a visualization</span>
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors cursor-pointer"
+                   onClick={() => setChatInput("What are the key insights from this data?")}>
+                <div className="flex items-center space-x-2 text-gray-700">
+                  <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  <span>Find key insights</span>
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors cursor-pointer"
+                   onClick={() => setChatInput("Calculate average values for numeric columns")}>
+                <div className="flex items-center space-x-2 text-gray-700">
+                  <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
+                  </svg>
+                  <span>Calculate statistics</span>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
           messages.map((message) => (
-            <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] sm:max-w-xs lg:max-w-md xl:max-w-lg ${
-                message.sender === 'user' ? 'order-2' : 'order-1'
+            <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} group`}>
+              <div className={`max-w-[85%] sm:max-w-2xl flex items-start space-x-3 ${
+                message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
               }`}>
-                {/* Message bubble */}
-                <div className={`px-3 sm:px-4 py-2 sm:py-3 rounded-2xl ${
+                {/* Avatar */}
+                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
                   message.sender === 'user' 
-                    ? 'bg-blue-600 text-white rounded-br-md' 
-                    : 'bg-gray-100 text-gray-900 rounded-bl-md'
+                    ? 'bg-blue-600' 
+                    : 'bg-emerald-500'
                 }`}>
-                  <p className="text-sm whitespace-pre-wrap break-words message-content">{message.message}</p>
-                  
-                  {/* Chart display for AI responses */}
-                  {message.chart_data && message.chart_type === 'image_url' && (
-                    <div className="mt-2 sm:mt-3 -mx-1">
-                      <img 
-                        src={message.chart_data} 
-                        alt="Generated chart" 
-                        className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow touch-manipulation"
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                          // Show error message
-                          const errorDiv = document.createElement('div');
-                          errorDiv.className = 'text-xs text-gray-500 italic mt-2 p-2 bg-gray-50 rounded border';
-                          errorDiv.textContent = 'Chart could not be loaded. Please try asking for the visualization again.';
-                          e.target.parentNode.appendChild(errorDiv);
-                        }}
-                        onClick={() => {
-                          // Open chart in new tab for better viewing
-                          window.open(message.chart_data, '_blank');
-                        }}
-                        title="Tap to view chart in full size"
-                      />
-                    </div>
-                  )}
-                  
-                  {/* Retry button for failed user messages */}
-                  {message.sender === 'user' && failedMessages.has(message.id) && (
-                    <div className="mt-2">
-                      <button
-                        onClick={() => handleRetryMessage(message)}
-                        disabled={isLoading || retryingMessageId === message.id}
-                        className="text-xs text-white/80 hover:text-white underline disabled:opacity-50 touch-manipulation"
-                      >
-                        {retryingMessageId === message.id ? 'Retrying...' : 'Retry'}
-                      </button>
-                    </div>
+                  {message.sender === 'user' ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
                   )}
                 </div>
                 
-                {/* Timestamp */}
-                <div className={`text-xs text-gray-500 mt-1 px-1 ${
-                  message.sender === 'user' ? 'text-right' : 'text-left'
-                }`}>
-                  {formatTimestamp(message.timestamp)}
+                {/* Message Content */}
+                <div className="flex-1">
+                  <div className={`px-4 py-3 rounded-2xl ${
+                    message.sender === 'user' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-white border border-gray-200 text-gray-900 shadow-sm'
+                  }`}>
+                    <p className="text-sm whitespace-pre-wrap break-words message-content">{message.message}</p>
+                    
+                    {/* Chart display for AI responses */}
+                    {message.chart_data && message.chart_type === 'image_url' && (
+                      <div className="mt-3 -mx-1">
+                        <img 
+                          src={message.chart_data} 
+                          alt="Generated chart" 
+                          className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow touch-manipulation"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            // Show error message
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = 'text-xs text-gray-500 italic mt-2 p-2 bg-gray-50 rounded border';
+                            errorDiv.textContent = 'Chart could not be loaded. Please try asking for the visualization again.';
+                            e.target.parentNode.appendChild(errorDiv);
+                          }}
+                          onClick={() => {
+                            // Open chart in new tab for better viewing
+                            window.open(message.chart_data, '_blank');
+                          }}
+                          title="Tap to view chart in full size"
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Retry button for failed user messages */}
+                    {message.sender === 'user' && failedMessages.has(message.id) && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => handleRetryMessage(message)}
+                          disabled={isLoading || retryingMessageId === message.id}
+                          className="text-xs text-white/80 hover:text-white underline disabled:opacity-50 touch-manipulation"
+                        >
+                          {retryingMessageId === message.id ? 'Retrying...' : 'Retry'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Timestamp */}
+                  <div className={`text-xs text-gray-500 mt-1 px-1 ${
+                    message.sender === 'user' ? 'text-right' : 'text-left'
+                  }`}>
+                    {formatTimestamp(message.timestamp)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -359,16 +420,21 @@ const ChatInterface = () => {
         
         {/* Loading indicator */}
         {isLoading && (
-          <div className="flex justify-start">
-            <div className="max-w-xs lg:max-w-md">
-              <div className="bg-gray-100 px-4 py-3 rounded-2xl rounded-bl-md">
+          <div className="flex justify-start group">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl shadow-sm">
                 <div className="flex items-center space-x-2">
                   <div className="flex space-x-1">
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                   </div>
-                  <span className="text-xs text-gray-500">AI is thinking...</span>
+                  <span className="text-xs text-gray-500">CSV Assistant is thinking...</span>
                 </div>
               </div>
             </div>
@@ -388,11 +454,11 @@ const ChatInterface = () => {
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask a question about your data..."
-              className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-2xl resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-sm sm:text-base touch-manipulation"
+              placeholder="Message CSV Assistant..."
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-sm sm:text-base touch-manipulation placeholder-gray-500 bg-gray-50 focus:bg-white"
               rows="1"
               style={{ 
-                minHeight: '40px',
+                minHeight: '48px',
                 maxHeight: '120px',
                 overflowY: chatInput.length > 100 ? 'auto' : 'hidden'
               }}
@@ -402,16 +468,16 @@ const ChatInterface = () => {
           <button
             onClick={handleSendMessage}
             disabled={!chatInput.trim() || isLoading}
-            className="flex-shrink-0 p-2 sm:p-3 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation active:bg-blue-800"
-            style={{ minHeight: '40px', minWidth: '40px' }}
+            className="flex-shrink-0 p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation active:bg-blue-800"
+            style={{ minHeight: '48px', minWidth: '48px' }}
           >
             {isLoading ? (
-              <svg className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
             ) : (
-              <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             )}
@@ -423,7 +489,7 @@ const ChatInterface = () => {
           Press Enter to send • Shift+Enter for new line
         </div>
         <div className="mt-1 text-xs text-gray-500 text-center sm:hidden">
-          Tap to send
+          Tap send button
         </div>
       </div>
     </div>
