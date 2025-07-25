@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 import pandas as pd
 import pymongo
 from pymongo import MongoClient
@@ -9,6 +9,10 @@ import io
 import os
 import json
 import uuid
+import re
+import pathlib
+import bson
+import traceback
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -19,13 +23,22 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
+try:
+    import seaborn as sns
+    SEABORN_AVAILABLE = True
+except ImportError:
+    SEABORN_AVAILABLE = False
+    print("Warning: Seaborn not available, using matplotlib only")
 import base64
 from io import BytesIO
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
-import pathlib
-import bson
+try:
+    import cloudinary
+    import cloudinary.uploader
+    import cloudinary.api
+    CLOUDINARY_AVAILABLE = True
+except ImportError:
+    CLOUDINARY_AVAILABLE = False
+    print("Warning: Cloudinary not available, charts will be saved locally only")
 
 # Import our custom grouping logic
 from grouping_logic import (
@@ -37,40 +50,65 @@ from grouping_logic import (
 # Load environment variables
 load_dotenv()
 
-# Configure Cloudinary
-cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
-    secure=True
-)
+# Configure Cloudinary (if available)
+if CLOUDINARY_AVAILABLE:
+    try:
+        cloudinary.config(
+            cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+            api_key=os.getenv("CLOUDINARY_API_KEY"),
+            api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+            secure=True
+        )
+        print("✅ Cloudinary configured successfully")
+    except Exception as e:
+        print(f"⚠️ Cloudinary configuration failed: {str(e)}")
+        CLOUDINARY_AVAILABLE = False
+else:
+    print("⚠️ Cloudinary not available - charts will be saved locally")
 
-# Import PandasAI components
+# Import PandasAI components and AI Data Science Team
 try:
-    from pandasai import SmartDataframe
-    from pandasai.llm import OpenAI
-    from pandasai.helpers.openai_info import get_openai_callback
-    from pandasai.middlewares import StorageMiddleware
-    from pandasai.middlewares import ChartMiddleware  # Add chart middleware
+    from langchain_openai import ChatOpenAI
+    from ai_data_science_team import (
+        PandasDataAnalyst,
+        DataWranglingAgent,
+        DataVisualizationAgent,
+    )
+    import plotly.io as pio
+    import json
     
-    # Create enhanced chart middleware for better visualization control
-    class EnhancedChartMiddleware(ChartMiddleware):
-        """Enhanced chart middleware for PandasAI with better chart support"""
-        
-        def run(self, df, config, prompt, prompt_id):
-            # Run the parent middleware
-            return super().run(df, config, prompt, prompt_id)
-        
-        def save_chart(self, figure, response_parser):
-            # Enhanced chart saving with better quality
-            import matplotlib.pyplot as plt
-            chart_path = super().save_chart(figure, response_parser)
-            return chart_path
-    
-    PANDASAI_AVAILABLE = True
+    AI_DATA_SCIENCE_AVAILABLE = True
+    print("AI Data Science Team package available")
 except ImportError:
-    PANDASAI_AVAILABLE = False
-    print("PandasAI not available, using fallback approach")
+    # Fallback to basic PandasAI if ai-data-science-team is not available
+    try:
+        from pandasai import SmartDataframe
+        from pandasai.llm import OpenAI
+        from pandasai.helpers.openai_info import get_openai_callback
+        from pandasai.middlewares import StorageMiddleware
+        from pandasai.middlewares import ChartMiddleware  # Add chart middleware
+        
+        # Create enhanced chart middleware for better visualization control
+        class EnhancedChartMiddleware(ChartMiddleware):
+            """Enhanced chart middleware for PandasAI with better chart support"""
+            
+            def run(self, df, config, prompt, prompt_id):
+                # Run the parent middleware
+                return super().run(df, config, prompt, prompt_id)
+            
+            def save_chart(self, figure, response_parser):
+                # Enhanced chart saving with better quality
+                import matplotlib.pyplot as plt
+                chart_path = super().save_chart(figure, response_parser)
+                return chart_path
+        
+        AI_DATA_SCIENCE_AVAILABLE = False
+        PANDASAI_AVAILABLE = True
+        print("Using fallback PandasAI package")
+    except ImportError:
+        AI_DATA_SCIENCE_AVAILABLE = False
+        PANDASAI_AVAILABLE = False
+        print("Neither AI Data Science Team nor PandasAI available, using enhanced fallback approach")
 
 # Load environment variables
 load_dotenv()
@@ -95,8 +133,9 @@ CHARTS_EXPORT_PATH = os.getenv("CHARTS_EXPORT_PATH", "exports/charts")
 # Ensure export directory exists
 os.makedirs(CHARTS_EXPORT_PATH, exist_ok=True)
 
-# Initialize OpenAI client
-openai.api_key = OPENAI_API_KEY
+# Initialize OpenAI client (updated for new API)
+from openai import OpenAI
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 def ensure_json_serializable(obj):
     """Recursively convert numpy types to Python types for JSON serialization"""
@@ -128,6 +167,393 @@ saved_groups_collection = db.saved_groups
 
 # Initialize grouping engine
 grouping_engine = ProductGroupingEngine(OPENAI_API_KEY)
+
+class AdvancedPandasDataAnalyst:
+    """Advanced Pandas Data Analyst with enhanced routing and visualization capabilities"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.charts_storage = []
+        self.dataframes_storage = []
+        
+        # Initialize the appropriate AI system
+        try:
+            if PANDASAI_AVAILABLE:
+                self.pandasai_llm = OpenAI(api_token=api_key, model="gpt-4")
+                self.mode = "pandasai"
+                print("[INFO] Using PandasAI mode")
+            else:
+                self.mode = "fallback"
+                print("[INFO] Using fallback mode - PandasAI not available")
+        except Exception as e:
+            print(f"[WARNING] Error initializing PandasAI: {str(e)}")
+            self.mode = "fallback"
+            print("[INFO] Falling back to enhanced fallback mode")
+    
+    async def analyze_data(self, df: pd.DataFrame, question: str) -> Dict[str, Any]:
+        """Analyze data and return response with charts/tables"""
+        
+        if self.mode == "pandasai":
+            return await self._analyze_with_enhanced_pandasai(df, question)
+        else:
+            return await self._analyze_with_enhanced_fallback(df, question)
+    
+    async def _analyze_with_enhanced_pandasai(self, df: pd.DataFrame, question: str) -> Dict[str, Any]:
+        """Enhanced PandasAI analysis with better routing"""
+        try:
+            # Custom path for saving charts
+            charts_dir = pathlib.Path(CHARTS_EXPORT_PATH)
+            charts_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Determine if this should be a chart or table request
+            routing_decision = self._determine_routing(question, df)
+            
+            # Configure PandasAI based on routing decision
+            if routing_decision == "chart":
+                config = {
+                    "llm": self.pandasai_llm,
+                    "verbose": False,
+                    "save_charts": True,
+                    "save_charts_path": str(charts_dir),
+                    "enable_cache": False,
+                    "custom_instructions": f"""
+                    The user is asking for a visualization: {question}
+                    
+                    Create an appropriate chart based on the request:
+                    - For comparisons, use bar charts
+                    - For trends over time, use line charts  
+                    - For distributions, use histograms or box plots
+                    - For proportions, use pie charts
+                    - For relationships, use scatter plots
+                    
+                    Always include proper titles, labels, and legends.
+                    Make the chart clear and professional.
+                    
+                    Return a chart image.
+                    """
+                }
+                
+                # Force chart generation
+                enhanced_question = f"Create a visualization to show: {question}. Generate a chart."
+                
+            else:
+                config = {
+                    "llm": self.pandasai_llm,
+                    "verbose": False,
+                    "save_charts": False,
+                    "enable_cache": False,
+                    "custom_instructions": f"""
+                    The user is asking for data analysis: {question}
+                    
+                    Provide a clear, helpful response with:
+                    - Relevant data insights
+                    - Key findings
+                    - Specific numbers and statistics when appropriate
+                    
+                    If the data would be helpful to show, return it in a tabular format.
+                    """
+                }
+                
+                enhanced_question = question
+            
+            # Create SmartDataframe
+            smart_df = SmartDataframe(df, config=config)
+            
+            # Run the query
+            response = smart_df.chat(enhanced_question)
+            
+            response_data = {
+                "response": str(response),
+                "chart_data": None,
+                "chart_type": None,
+                "data_table": None,
+                "routing": routing_decision
+            }
+            
+            # Check if PandasAI generated any charts
+            chart_files = list(charts_dir.glob("temp_chart_*.png"))
+            
+            if chart_files and routing_decision == "chart":
+                # Use the latest chart
+                latest_chart = max(chart_files, key=lambda x: x.stat().st_mtime)
+                
+                # Upload chart to Cloudinary
+                chart_id = str(uuid.uuid4())
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                chart_filename = f"enhanced_pandasai_{chart_id}_{timestamp}"
+                
+                cloudinary_response = cloudinary.uploader.upload(
+                    str(latest_chart),
+                    public_id=chart_filename,
+                    folder="csv_charts",
+                    overwrite=True
+                )
+                
+                response_data["chart_data"] = cloudinary_response['secure_url']
+                response_data["chart_type"] = "plotly_chart"
+                response_data["response"] = f"I've created a visualization for your question: {question}\\n\\n{response}"
+                
+                # Delete the temporary file
+                latest_chart.unlink(missing_ok=True)
+            
+            # If no chart was generated but one was expected, try fallback chart generation
+            elif routing_decision == "chart" and not chart_files:
+                print("No chart generated by PandasAI, trying fallback chart generation...")
+                fallback_chart_data, fallback_chart_type = await generate_simple_chart(df, question)
+                if fallback_chart_data:
+                    response_data["chart_data"] = fallback_chart_data
+                    response_data["chart_type"] = fallback_chart_type
+                    response_data["response"] = f"I've created a visualization for your question using our fallback system:\\n\\n{response}"
+            
+            # For table requests, try to extract meaningful data
+            elif routing_decision == "table":
+                # Try to provide structured data if the response suggests it
+                table_data = self._extract_table_data(df, question, str(response))
+                if table_data:
+                    response_data["data_table"] = table_data
+                    response_data["chart_type"] = "data_table"
+            
+            return response_data
+            
+        except Exception as e:
+            print(f"Enhanced PandasAI error: {str(e)}")
+            return await self._analyze_with_enhanced_fallback(df, question)
+    
+    def _determine_routing(self, question: str, df: pd.DataFrame) -> str:
+        """Determine whether to route to chart or table based on question analysis"""
+        question_lower = question.lower()
+        
+        # Chart indicators (strong keywords that clearly indicate visualization)
+        chart_keywords = [
+            'chart', 'graph', 'plot', 'visualization', 'visualize',
+            'bar chart', 'line chart', 'pie chart', 'scatter plot', 'histogram',
+            'distribution', 'illustrate', 'draw', 'create a chart', 'make a plot',
+            'plot', 'display', 'correlation'
+        ]
+        
+        # Table indicators (keywords that suggest data retrieval/analysis)
+        table_keywords = [
+            'list', 'show data', 'table', 'rows', 'records', 'entries',
+            'find', 'filter', 'search', 'top', 'bottom', 'highest', 'lowest',
+            'count', 'sum', 'average', 'mean', 'median', 'statistics',
+            'group by', 'sort', 'order by', 'what are', 'which', 'where'
+        ]
+        
+        # Strong chart indicators (these override other logic)
+        strong_chart_indicators = [
+            'create a visualization', 'make a chart', 'show me a graph',
+            'plot', 'chart', 'graph', 'visualization'
+        ]
+        
+        # Strong table indicators
+        strong_table_indicators = [
+            'what are the', 'list the', 'show me the data', 'find all',
+            'which products', 'what products', 'how many'
+        ]
+        
+        # Check for strong indicators first
+        for indicator in strong_chart_indicators:
+            if indicator in question_lower:
+                return "chart"
+                
+        for indicator in strong_table_indicators:
+            if indicator in question_lower:
+                return "table"
+        
+        # Count keyword matches
+        chart_score = sum(1 for keyword in chart_keywords if keyword in question_lower)
+        table_score = sum(1 for keyword in table_keywords if keyword in question_lower)
+        
+        # Additional context-based scoring
+        if any(word in question_lower for word in ['over time', 'by month', 'by year', 'trend', 'trends']):
+            chart_score += 3  # Time-based questions usually need charts
+            
+        if any(word in question_lower for word in ['compare', 'comparison', 'vs', 'versus']):
+            chart_score += 2  # Comparisons often benefit from charts
+            
+        if any(word in question_lower for word in ['how many', 'what are', 'which', 'where']):
+            table_score += 2  # These question words often need data tables
+            
+            # Questions about specific values or lists
+            if question_lower.startswith(('what', 'which', 'how many', 'list', 'find', 'show')):
+                if not any(viz_word in question_lower for viz_word in ['chart', 'graph', 'plot', 'visualization']):
+                    table_score += 2
+            
+            # Handle "tell me" and "analyze" - these are informational requests
+            if any(phrase in question_lower for phrase in ['tell me', 'analyze', 'explain', 'describe']):
+                if not any(viz_word in question_lower for viz_word in ['chart', 'graph', 'plot', 'visualization']):
+                    table_score += 3  # Strong preference for data tables for informational requests        # If "show me" is followed by visualization terms, it's likely a chart
+        if 'show me' in question_lower:
+            show_me_context = question_lower.split('show me')[1] if 'show me' in question_lower else ""
+            if any(viz_word in show_me_context for viz_word in ['chart', 'graph', 'plot', 'visualization']):
+                chart_score += 3
+            elif any(data_word in show_me_context for data_word in ['data', 'table', 'list', 'records']):
+                table_score += 2
+            else:
+                # "show me X" without specific context - could be either, slight preference for chart
+                chart_score += 1
+        
+        print(f"[DEBUG] Routing analysis for '{question}': chart_score={chart_score}, table_score={table_score}")
+        
+        # Decision logic
+        if chart_score > table_score:
+            return "chart"
+        elif table_score > chart_score:
+            return "table"
+        else:
+            # Tie-breaker: check question structure
+            if '?' in question and any(word in question_lower for word in ['what', 'how', 'which', 'where', 'who']):
+                return "table"  # Question words usually need data
+            else:
+                return "chart"  # Default to chart for ambiguous cases
+    
+    def _extract_table_data(self, df: pd.DataFrame, question: str, response: str) -> Optional[List[Dict]]:
+        """Try to extract relevant table data based on the question and response"""
+        try:
+            question_lower = question.lower()
+            
+            # Extract numbers from question for limits
+            import re
+            numbers = re.findall(r'\b\d+\b', question_lower)
+            limit = int(numbers[0]) if numbers else 10
+            
+            # Limit to reasonable ranges
+            limit = min(max(limit, 1), 100)
+            
+            # Handle "top" queries
+            if 'top' in question_lower:
+                # Find the best numeric column to sort by
+                numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                
+                # Try to identify which column to sort by based on question context
+                sort_column = None
+                for col in numeric_cols:
+                    if col.lower() in question_lower:
+                        sort_column = col
+                        break
+                
+                # If no specific column mentioned, use first numeric column
+                if not sort_column and numeric_cols:
+                    sort_column = numeric_cols[0]
+                    
+                if sort_column:
+                    sorted_df = df.nlargest(limit, sort_column)
+                    return sorted_df.to_dict('records')
+            
+            # Handle "bottom" or "lowest" queries
+            elif any(word in question_lower for word in ['bottom', 'lowest', 'smallest', 'minimum']):
+                numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                
+                sort_column = None
+                for col in numeric_cols:
+                    if col.lower() in question_lower:
+                        sort_column = col
+                        break
+                        
+                if not sort_column and numeric_cols:
+                    sort_column = numeric_cols[0]
+                    
+                if sort_column:
+                    sorted_df = df.nsmallest(limit, sort_column)
+                    return sorted_df.to_dict('records')
+            
+            # Handle filtering queries
+            elif any(word in question_lower for word in ['filter', 'where', 'with', 'category', 'type']):
+                # Try to extract filter criteria
+                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+                
+                for col in categorical_cols:
+                    if col.lower() in question_lower:
+                        # Try to find values mentioned in the question
+                        unique_values = df[col].unique()
+                        for value in unique_values:
+                            if str(value).lower() in question_lower:
+                                filtered_df = df[df[col] == value]
+                                return filtered_df.head(limit).to_dict('records')
+                
+                # If no specific filter found, return sample data
+                return df.head(limit).to_dict('records')
+            
+            # Handle summary/statistics queries
+            elif any(word in question_lower for word in ['summary', 'overview', 'statistics', 'stats', 'describe']):
+                # Return statistical summary
+                desc = df.describe(include='all').fillna('')
+                return desc.to_dict()
+            
+            # Handle average/mean queries
+            elif any(word in question_lower for word in ['average', 'mean']):
+                numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                if numeric_cols:
+                    means = df[numeric_cols].mean()
+                    return [{"Metric": col, "Average": round(means[col], 2)} for col in numeric_cols]
+            
+            # Handle count queries
+            elif any(word in question_lower for word in ['count', 'how many']):
+                # Count by categories if categorical columns exist
+                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+                if categorical_cols:
+                    col = categorical_cols[0]
+                    counts = df[col].value_counts()
+                    return [{"Category": idx, "Count": val} for idx, val in counts.head(limit).items()]
+                else:
+                    return [{"Total Records": len(df)}]
+            
+            # Default: return first few rows with all columns
+            return df.head(limit).to_dict('records')
+            
+        except Exception as e:
+            print(f"Error extracting table data: {str(e)}")
+            # Fallback: return first 5 rows
+            try:
+                return df.head(5).to_dict('records')
+            except:
+                return None
+    
+    async def _analyze_with_enhanced_fallback(self, df: pd.DataFrame, question: str) -> Dict[str, Any]:
+        """Enhanced fallback analysis with better routing"""
+        try:
+            routing_decision = self._determine_routing(question, df)
+            
+            # Use the existing enhanced_csv_analysis function
+            response = await enhanced_csv_analysis(df, question)
+            
+            response_data = {
+                "response": response,
+                "chart_data": None,
+                "chart_type": None,
+                "data_table": None,
+                "routing": routing_decision
+            }
+            
+            if routing_decision == "chart":
+                # Generate visualization
+                chart_data, chart_type = await generate_simple_chart(df, question)
+                response_data["chart_data"] = chart_data
+                response_data["chart_type"] = chart_type
+                
+                if chart_data:
+                    response_data["response"] = f"I've created a visualization to help answer your question:\\n\\n{response}"
+            
+            elif routing_decision == "table":
+                # Try to extract relevant data
+                table_data = self._extract_table_data(df, question, response)
+                if table_data:
+                    response_data["data_table"] = table_data
+                    response_data["chart_type"] = "data_table"
+            
+            return response_data
+            
+        except Exception as e:
+            return {
+                "response": f"I apologize, but I encountered an error analyzing your data: {str(e)}",
+                "chart_data": None,
+                "chart_type": None,
+                "data_table": None,
+                "routing": "error"
+            }
+
+# Initialize advanced pandas data analyst
+advanced_data_analyst = AdvancedPandasDataAnalyst(OPENAI_API_KEY)
 
 def create_fallback_groups(df: pd.DataFrame) -> Dict[str, Any]:
     """Create simple fallback groups when main algorithm fails"""
@@ -524,7 +950,6 @@ class AnalysisResult(BaseModel):
 
 class ChatMessage(BaseModel):
     message: str
-    file_id: str
 
 class ChatResponse(BaseModel):
     response: str
@@ -949,7 +1374,7 @@ async def delete_file(file_id: str):
 
 @app.post("/api/chat/{file_id}")
 async def chat_with_csv(file_id: str, message: ChatMessage):
-    """Chat with CSV data using PandasAI and OpenAI"""
+    """Chat with CSV data using Advanced Pandas Data Analyst"""
     try:
         # Retrieve file from GridFS
         file_data = fs.get(file_id)
@@ -989,115 +1414,80 @@ async def chat_with_csv(file_id: str, message: ChatMessage):
             "timestamp": datetime.now()
         })
         
-        # Track if a chart is generated
-        chart_data = None
-        chart_type = None
-        response = None
-        
-        # Check if we should generate a visualization based on keywords
-        should_visualize = any(keyword in user_question.lower() for keyword in 
-                               ['chart', 'graph', 'plot', 'visualization', 'visualize',
-                                'bar', 'line', 'pie', 'scatter', 'histogram', 'distribution',
-                                'trend', 'compare', 'correlation', 'show me', 'display'])
-        
+        # Use the advanced pandas data analyst
         try:
-            # Use PandasAI if available
-            if PANDASAI_AVAILABLE:
-                # Custom path for saving charts
-                charts_dir = pathlib.Path(CHARTS_EXPORT_PATH)
-                charts_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Initialize OpenAI LLM for PandasAI
-                llm = OpenAI(api_token=OPENAI_API_KEY, model="gpt-4")
-                
-                # Configure PandasAI with chart saving
-                config = {
-                    "llm": llm,
-                    "verbose": True,
-                    "save_charts": True,
-                    "save_charts_path": str(charts_dir),
-                    "enable_cache": False,
-                    "custom_instructions": """
-                    When generating charts:
-                    1. Use appropriate visualizations for the data type
-                    2. Ensure proper titles, labels, and legends
-                    3. Choose suitable color schemes for readability
-                    4. For time series, use line charts
-                    5. For categorical comparisons, use bar charts
-                    6. For distributions, use histograms or box plots
-                    7. For relationships between variables, use scatter plots
-                    8. For proportions, use pie charts or donut charts
-                    9. Add insights in the response about what the visualization shows
-                    """
-                }
-                
-                # Create SmartDataframe with the configuration
-                smart_df = SmartDataframe(df, config=config)
-                
-                # Run the query
-                with get_openai_callback() as cb:
-                    # Force generation of charts if requested
-                    if should_visualize and not any(viz_command in user_question.lower() for viz_command in ['generate', 'create', 'plot', 'show']):
-                        enhanced_question = f"Generate a visualization for: {user_question}"
-                        response = smart_df.chat(enhanced_question)
-                    else:
-                        response = smart_df.chat(user_question)
-                    print(f"Tokens used: {cb.total_tokens}, Cost: ${cb.total_cost}")
-                
-                # Check if PandasAI generated any charts
-                chart_files = list(charts_dir.glob("temp_chart_*.png"))
-                
-                if chart_files:
-                    # Use the latest chart (if multiple were generated)
-                    latest_chart = max(chart_files, key=lambda x: x.stat().st_mtime)
-                    
-                    # Upload chart to Cloudinary
-                    chart_id = str(uuid.uuid4())
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    chart_filename = f"pandasai_{chart_id}_{timestamp}"
-                    
-                    cloudinary_response = cloudinary.uploader.upload(
-                        str(latest_chart),
-                        public_id=chart_filename,
-                        folder="csv_charts",
-                        overwrite=True
-                    )
-                    
-                    # Set chart data and type for response
-                    chart_data = cloudinary_response['secure_url']
-                    chart_type = "image_url"
-                    
-                    # Store chart metadata in database
-                    charts_collection.insert_one({
-                        "file_id": file_id,
-                        "chart_url": chart_data,
-                        "chart_type": chart_type,
-                        "question": user_question,
-                        "created_at": datetime.now()
-                    })
-                    
-                    # Delete the temporary file
-                    latest_chart.unlink(missing_ok=True)
-                
-                # If response is not a string, convert it
-                if not isinstance(response, str):
-                    if hasattr(response, 'to_string'):
-                        response = response.to_string()
-                    else:
-                        response = str(response)
-                
-            else:
-                # PandasAI not available, use fallback
-                raise ImportError("PandasAI not available")
-                
-        except Exception as pandas_ai_error:
-            print(f"PandasAI error or not available: {str(pandas_ai_error)}")
-            # Use enhanced fallback approach
-            response = await enhanced_csv_analysis(df, user_question)
+            analysis_result = await advanced_data_analyst.analyze_data(df, user_question)
             
-            # Try to generate charts if requested
+            response = analysis_result.get("response", "I'm sorry, I couldn't process your question.")
+            chart_data = analysis_result.get("chart_data")
+            chart_type = analysis_result.get("chart_type")
+            data_table = analysis_result.get("data_table")
+            routing = analysis_result.get("routing", "unknown")
+            
+            # Enhanced response formatting based on routing and data type
+            if data_table and chart_type == "data_table":
+                # Format table data nicely in the response
+                if len(data_table) > 0:
+                    table_preview = data_table[:10]  # Show first 10 rows
+                    remaining_count = len(data_table) - len(table_preview)
+                    
+                    table_info = f"\\n\\n📊 **Data Results** (showing {len(table_preview)} of {len(data_table)} rows):\\n"
+                    
+                    # Format as a simple table
+                    if table_preview and isinstance(table_preview[0], dict):
+                        headers = list(table_preview[0].keys())
+                        
+                        # Create header row
+                        table_info += "| " + " | ".join(str(h) for h in headers) + " |\\n"
+                        table_info += "|" + "|".join(["-" * (len(str(h)) + 2) for h in headers]) + "|\\n"
+                        
+                        # Add data rows
+                        for i, row in enumerate(table_preview):
+                            row_values = [str(row.get(h, "")) for h in headers]
+                            table_info += "| " + " | ".join(row_values) + " |\\n"
+                        
+                        if remaining_count > 0:
+                            table_info += f"\\n*... and {remaining_count} more rows*"
+                    
+                    response += table_info
+            
+            # Add routing information for debugging (can be removed in production)
+            if routing != "unknown":
+                response += f"\\n\\n*Analysis type: {routing}*"
+            
+            # Store chart metadata if a chart was generated
+            if chart_data and chart_type:
+                charts_collection.insert_one({
+                    "file_id": file_id,
+                    "chart_url": chart_data,
+                    "chart_type": chart_type,
+                    "question": user_question,
+                    "routing": routing,
+                    "created_at": datetime.now()
+                })
+            
+        except Exception as analyst_error:
+            print(f"Advanced analyst error: {str(analyst_error)}")
+            print(f"Error traceback: {traceback.format_exc()}")
+            
+            # Ultimate fallback
+            response = await enhanced_csv_analysis(df, user_question)
+            chart_data = None
+            chart_type = None
+            
+            # Try to generate charts if requested as fallback
+            should_visualize = any(keyword in user_question.lower() for keyword in 
+                                   ['chart', 'graph', 'plot', 'visualization', 'visualize',
+                                    'bar', 'line', 'pie', 'scatter', 'histogram', 'distribution',
+                                    'trend', 'compare', 'correlation', 'show me', 'display'])
+            
             if should_visualize:
-                chart_data, chart_type = await generate_simple_chart(df, user_question)
+                try:
+                    chart_data, chart_type = await generate_simple_chart(df, user_question)
+                except Exception as chart_error:
+                    print(f"Fallback chart generation error: {str(chart_error)}")
+                    chart_data = None
+                    chart_type = None
         
         # Store AI response in chat history
         chat_collection.insert_one({
@@ -1409,20 +1799,31 @@ async def generate_simple_chart(df: pd.DataFrame, question: str) -> tuple:
             # Save locally first
             fig.write_image(local_path)
         
-        # Upload to Cloudinary if a chart was created
+        # Upload to Cloudinary if available, otherwise provide local path
         if os.path.exists(local_path):
-            cloudinary_response = cloudinary.uploader.upload(
-                local_path,
-                public_id=chart_filename,
-                folder="csv_charts",
-                overwrite=True
-            )
-            
-            chart_data = cloudinary_response['secure_url']
-            chart_type = "image_url"
-            
-            # Clean up local file after upload
-            os.remove(local_path)
+            if CLOUDINARY_AVAILABLE:
+                try:
+                    cloudinary_response = cloudinary.uploader.upload(
+                        local_path,
+                        public_id=chart_filename,
+                        folder="csv_charts",
+                        overwrite=True
+                    )
+                    
+                    chart_data = cloudinary_response['secure_url']
+                    chart_type = "image_url"
+                    
+                    # Clean up local file after upload
+                    os.remove(local_path)
+                except Exception as upload_error:
+                    print(f"Cloudinary upload failed: {upload_error}")
+                    # Fall back to local file serving
+                    chart_data = f"/api/local-charts/{chart_filename}.png"
+                    chart_type = "local_image"
+            else:
+                # Cloudinary not available, use local file serving
+                chart_data = f"/api/local-charts/{chart_filename}.png"
+                chart_type = "local_image"
             
         return chart_data, chart_type
         
@@ -1462,7 +1863,12 @@ async def enhanced_csv_analysis(df: pd.DataFrame, question: str) -> str:
         should_visualize = any(keyword in question.lower() for keyword in 
                           ['chart', 'graph', 'plot', 'visualization', 'visualize',
                            'bar', 'line', 'pie', 'scatter', 'histogram', 'distribution',
-                           'trend', 'compare', 'correlation', 'show me', 'display'])
+                           'trend', 'compare', 'correlation', 'show me a chart', 'display chart'])
+        
+        # Detect tabular data request (informational queries)
+        is_informational = any(phrase in question.lower() for phrase in 
+                          ['tell me', 'analyze', 'explain', 'describe', 'what', 'which', 'how many', 'list', 'find']) and \
+                          not should_visualize
         
         # Create comprehensive prompt
         prompt = f"""
@@ -1485,12 +1891,14 @@ async def enhanced_csv_analysis(df: pd.DataFrame, question: str) -> str:
 
         User Question: "{question}"
 
-        {'In addition to answering the question, I will generate a visualization to help illustrate the answer.' if should_visualize else ''}
+        {'Focus on generating a visualization to help illustrate the answer.' if should_visualize 
+         else 'Provide a clear data table or structured answer with specific values and insights.' if is_informational 
+         else ''}
         
         Provide a helpful, detailed answer based on the data. If the question asks for specific calculations, provide estimates based on the sample data and statistics. If asking for visualizations, mention that a chart will be generated separately.
         """
         
-        response = openai.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful data analyst assistant. Provide clear, actionable insights about the dataset."},
@@ -1553,6 +1961,33 @@ async def get_charts(file_id: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching charts: {str(e)}")
+
+@app.get("/api/local-charts/{filename}")
+async def serve_local_chart(filename: str):
+    """Serve locally stored chart images when Cloudinary is not available"""
+    try:
+        chart_path = os.path.join(CHARTS_EXPORT_PATH, filename)
+        
+        if not os.path.exists(chart_path):
+            raise HTTPException(status_code=404, detail="Chart not found")
+        
+        # Determine content type based on file extension
+        if filename.endswith('.png'):
+            media_type = "image/png"
+        elif filename.endswith('.jpg') or filename.endswith('.jpeg'):
+            media_type = "image/jpeg"
+        elif filename.endswith('.svg'):
+            media_type = "image/svg+xml"
+        else:
+            media_type = "application/octet-stream"
+        
+        return StreamingResponse(
+            io.BytesIO(open(chart_path, "rb").read()),
+            media_type=media_type
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving chart: {str(e)}")
 
 # ================== GROUP MANAGEMENT ENDPOINTS ==================
 
@@ -3225,11 +3660,19 @@ if __name__ == "__main__":
     import uvicorn
     
     # Check environment variables and display status
+    try:
+        if CLOUDINARY_AVAILABLE:
+            cloudinary_status = "✓ Set" if cloudinary.config().cloud_name else "❌ Missing"
+        else:
+            cloudinary_status = "❌ Not Available"
+    except:
+        cloudinary_status = "❌ Missing or Error"
+        
     env_vars = {
         "MONGO_URL": MONGO_URL,
         "DB_NAME": DB_NAME,
         "OPENAI_API_KEY": "✓ Set" if OPENAI_API_KEY else "❌ Missing",
-        "CLOUDINARY_CONFIG": "✓ Set" if cloudinary.config().cloud_name else "❌ Missing",
+        "CLOUDINARY_CONFIG": cloudinary_status,
         "PANDASAI_AVAILABLE": "✓ Available" if PANDASAI_AVAILABLE else "❌ Not available"
     }
     
