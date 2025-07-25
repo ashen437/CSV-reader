@@ -1372,6 +1372,46 @@ async def delete_file(file_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
 
+@app.get("/api/file-columns/{file_id}")
+async def get_file_columns(file_id: str):
+    """Get available columns for a specific file"""
+    try:
+        # Retrieve file from GridFS
+        file_data = fs.get(file_id)
+        content = file_data.read()
+        
+        # Try to detect the encoding and parse CSV with error handling
+        try:
+            # First attempt: Try using pandas with default UTF-8
+            df = pd.read_csv(BytesIO(content), encoding='utf-8')
+        except UnicodeDecodeError:
+            # Second attempt: Try with 'latin-1' encoding
+            try:
+                df = pd.read_csv(BytesIO(content), encoding='latin-1')
+            except Exception:
+                # Third attempt: Try with 'cp1252' encoding
+                df = pd.read_csv(BytesIO(content), encoding='cp1252')
+        
+        columns = df.columns.tolist()
+        sample_data = {}
+        
+        # Get sample values for each column (first non-null value)
+        for col in columns:
+            non_null_values = df[col].dropna()
+            if len(non_null_values) > 0:
+                sample_data[col] = str(non_null_values.iloc[0])
+            else:
+                sample_data[col] = "N/A"
+        
+        return {
+            "columns": columns,
+            "sample_data": sample_data,
+            "total_columns": len(columns)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting file columns: {str(e)}")
+
 @app.post("/api/chat/{file_id}")
 async def chat_with_csv(file_id: str, message: ChatMessage):
     """Chat with CSV data using Advanced Pandas Data Analyst"""

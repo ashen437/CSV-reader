@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import ItemDetailsPopup from './ItemDetailsPopup';
+import { useColumnSelection } from '../contexts/ColumnSelectionContext';
 
 const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
@@ -37,6 +39,19 @@ function GroupManagement() {
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [selectedGroupForMove, setSelectedGroupForMove] = useState(null);
   const [selectedSubGroupForMove, setSelectedSubGroupForMove] = useState(null);
+
+  // Item Details Popup States
+  const [showItemDetails, setShowItemDetails] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [selectedSubGroupItems, setSelectedSubGroupItems] = useState([]);
+  
+  // Column Selection Context
+  const { 
+    availableColumns, 
+    selectedColumns, 
+    updateAvailableColumns, 
+    updateSelectedColumns 
+  } = useColumnSelection();
 
   // Fetch file data and structured plans on component mount
   useEffect(() => {
@@ -311,6 +326,52 @@ function GroupManagement() {
       target_group_id: "main_group_ungrouped",
       data: { main_group_id: mainGroupId }
     });
+  };
+
+  // Extract columns from items data as fallback
+  const extractAndSetColumns = (items) => {
+    if (items && items.length > 0) {
+      const allColumns = new Set();
+      items.forEach(item => {
+        if (item && typeof item === 'object') {
+          Object.keys(item).forEach(key => {
+            allColumns.add(key);
+          });
+        }
+      });
+      updateAvailableColumns(fileId, Array.from(allColumns));
+    }
+  };
+
+  // Item Details Popup Handlers
+  const handleItemClick = async (item, subGroupItems = []) => {
+    setSelectedItem(item);
+    setSelectedSubGroupItems(subGroupItems);
+    setShowItemDetails(true);
+    
+    // Try to get columns from backend first, fallback to extracting from items
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/file-columns/${fileId}`);
+      if (response.ok) {
+        const data = await response.json();
+        updateAvailableColumns(fileId, data.columns);
+      } else {
+        // Fallback: extract columns from items
+        const allItems = [item, ...subGroupItems];
+        extractAndSetColumns(allItems);
+      }
+    } catch (error) {
+      console.error('Error fetching columns:', error);
+      // Fallback: extract columns from items
+      const allItems = [item, ...subGroupItems];
+      extractAndSetColumns(allItems);
+    }
+  };
+
+  const handleCloseItemDetails = () => {
+    setShowItemDetails(false);
+    setSelectedItem(null);
+    setSelectedSubGroupItems([]);
   };
 
   const saveStructuredPlan = async (planName, description) => {
@@ -815,7 +876,14 @@ function GroupManagement() {
                           
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                             {(subGroup.items || []).map((item) => (
-                              <div key={item.id} className="p-2 bg-white rounded border text-sm group hover:bg-gray-50">
+                              <div 
+                                key={item.id} 
+                                className="p-2 bg-white rounded border text-sm group hover:bg-gray-50 cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleItemClick(item, subGroup.items || []);
+                                }}
+                              >
                                 <div className="flex items-start justify-between">
                                   <div className="flex-1 min-w-0">
                                     <div className="font-medium truncate">{item.name}</div>
@@ -828,7 +896,10 @@ function GroupManagement() {
                                   </div>
                                   {!subGroup.is_ungrouped_subgroup && (
                                     <button
-                                      onClick={() => handleRemoveFromSubGroup(group.id, subGroup.id, item.id)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveFromSubGroup(group.id, subGroup.id, item.id);
+                                      }}
                                       className="ml-2 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 text-xs p-1"
                                       title="Remove from sub-group"
                                     >
@@ -878,7 +949,19 @@ function GroupManagement() {
                         className={`p-3 border rounded cursor-pointer hover:bg-gray-50 ${
                           selectedItems.has(item.id) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
                         }`}
-                        onClick={() => handleItemSelection(item.id)}
+                        onClick={(e) => {
+                          if (e.target.type === 'checkbox') {
+                            return; // Let checkbox handle its own click
+                          }
+                          
+                          if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                            // If modifier keys are held, do selection instead of popup
+                            handleItemSelection(item.id);
+                          } else {
+                            // Regular click shows popup
+                            handleItemClick(item, groupManagementData.ungrouped_items);
+                          }
+                        }}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0">
@@ -896,7 +979,10 @@ function GroupManagement() {
                           <input
                             type="checkbox"
                             checked={selectedItems.has(item.id)}
-                            onChange={() => handleItemSelection(item.id)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              handleItemSelection(item.id);
+                            }}
                             className="ml-2 rounded"
                           />
                         </div>
@@ -1033,6 +1119,17 @@ function GroupManagement() {
           </div>
         </div>
       )}
+
+      {/* Item Details Popup */}
+      <ItemDetailsPopup
+        item={selectedItem}
+        subGroupItems={selectedSubGroupItems}
+        availableColumns={availableColumns}
+        selectedColumns={selectedColumns}
+        onColumnsChange={updateSelectedColumns}
+        onClose={handleCloseItemDetails}
+        isOpen={showItemDetails}
+      />
     </div>
   );
 }
