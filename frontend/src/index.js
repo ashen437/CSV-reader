@@ -6,6 +6,7 @@ import App from "./App";
 import GroupManagement from "./components/GroupManagement";
 import GroupConfigurationPreview from "./components/GroupConfigurationPreview";
 import ChartsPage from "./components/ChartsPage";
+import Groups from "./components/Groups";
 import NavigationBar from "./components/NavigationBar";
 import NavigationErrorBoundary from "./components/NavigationErrorBoundary";
 import { DocumentProvider } from "./contexts/DocumentContext";
@@ -23,6 +24,7 @@ root.render(
           <Routes>
             <Route path="/" element={<App />} />
             <Route path="/charts" element={<ChartsPage />} />
+            <Route path="/groups" element={<Groups />} />
             <Route path="/configure-groups/:fileId" element={<GroupConfigurationPreview />} />
             <Route path="/group-management/:fileId" element={<GroupManagement />} />
             <Route path="*" element={

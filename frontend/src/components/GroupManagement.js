@@ -19,6 +19,14 @@ function GroupManagement() {
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [validationResults, setValidationResults] = useState(null);
 
+  // Final Results States
+  const [finalResults, setFinalResults] = useState(null);
+  const [isSavingFinalResults, setIsSavingFinalResults] = useState(false);
+  const [isLoadingFinalResults, setIsLoadingFinalResults] = useState(false);
+  const [showSaveGroupModal, setShowSaveGroupModal] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupDescription, setGroupDescription] = useState('');
+
   // UI States
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [editingGroup, setEditingGroup] = useState(null);
@@ -127,37 +135,6 @@ function GroupManagement() {
       console.error('Error loading structured plans:', error);
     } finally {
       setIsLoadingPlans(false);
-    }
-  };
-
-  const generateIntelligentGroups = async () => {
-    if (!selectedFile) return;
-    
-    setIsGeneratingGroups(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/group-management/generate/${fileId}`, {
-        method: 'POST',
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setGroupManagementData(data);
-        setValidationResults(data.validation);
-        setGroupManagementMode('fresh');
-        // Expand all groups by default
-        if (data?.groups) {
-          setExpandedGroups(new Set(data.groups.map((g, i) => g.id || i)));
-        }
-        setSelectedItems(new Set());
-      } else {
-        const error = await response.json();
-        alert(`Error generating groups: ${error.detail}`);
-      }
-    } catch (error) {
-      console.error('Error generating groups:', error);
-      alert('Error generating groups');
-    } finally {
-      setIsGeneratingGroups(false);
     }
   };
 
@@ -367,6 +344,103 @@ function GroupManagement() {
     }
   };
 
+  // Final Results Functions
+  const saveGroupWithName = async () => {
+    if (!groupName.trim()) {
+      alert('Please enter a group name');
+      return;
+    }
+
+    if (!finalResults) {
+      alert('No final results available to save');
+      return;
+    }
+
+    setIsSavingFinalResults(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/saved-groups`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: groupName.trim(),
+          description: groupDescription.trim(),
+          structured_results: finalResults.structured_results || finalResults,
+          file_id: fileId,
+          created_at: new Date().toISOString()
+        }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        alert('Final results saved successfully! You can view it in the Saved Groups tab.');
+        setShowSaveGroupModal(false);
+        setGroupName('');
+        setGroupDescription('');
+      } else {
+        const error = await response.json();
+        alert(`Error saving group: ${error.detail}`);
+      }
+    } catch (error) {
+      console.error('Error saving group:', error);
+      alert('Error saving group');
+    } finally {
+      setIsSavingFinalResults(false);
+    }
+  };
+
+  const loadFinalResults = async () => {
+    setIsLoadingFinalResults(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/final-results/structured/${fileId}`);
+      
+      if (response.ok) {
+        const result = await response.json();
+        setFinalResults(result.structured_results);
+        return result.structured_results;
+      } else {
+        const error = await response.json();
+        throw new Error(error.detail);
+      }
+    } catch (error) {
+      console.error('Error loading final results:', error);
+      throw error;
+    } finally {
+      setIsLoadingFinalResults(false);
+    }
+  };
+
+  const handleShowFinalResults = async () => {
+    try {
+      setIsLoadingFinalResults(true);
+      
+      // First generate final results from current group data
+      const response = await fetch(`${API_BASE_URL}/api/final-results/save/${fileId}`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        setFinalResults(result);
+        // Show the save modal to get name and description
+        setShowSaveGroupModal(true);
+      } else {
+        const error = await response.json();
+        alert(`Error generating final results: ${error.detail}`);
+      }
+    } catch (error) {
+      console.error('Error generating final results:', error);
+      alert('Error generating final results');
+    } finally {
+      setIsLoadingFinalResults(false);
+    }
+  };
+
+  const handleSaveGroup = () => {
+    setShowSaveGroupModal(true);
+  };
+
   const handleBackToDashboard = () => {
     navigate('/');
   };
@@ -467,56 +541,18 @@ function GroupManagement() {
                 </p>
               </div>
               <div className="flex space-x-4">
-              <button
-                onClick={generateIntelligentGroups}
-                disabled={isGeneratingGroups}
-                  className="btn-primary"
-                >
-                  Start Fresh
-                </button>
                 <button
-                  onClick={() => setShowSavePlanModal(true)}
-                  disabled={!groupManagementData || isSavingPlan}
-                  className="btn-secondary"
+                  onClick={handleShowFinalResults}
+                  disabled={!groupManagementData || isSavingFinalResults || isLoadingFinalResults}
+                  className="btn-success"
                 >
-                  Save as Plan
+                  {isSavingFinalResults || isLoadingFinalResults ? 'Loading...' : 'Save Final Results'}
                 </button>
                   </div>
             </div>
           </div>
             </div>
             
-        {/* Structured Plans Section */}
-        {structuredPlans.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm border mb-6">
-            <div className="p-6">
-              <h3 className="text-lg font-medium mb-4">Apply Existing Structured Plan</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {structuredPlans.map(plan => (
-                  <div key={plan.id} className="border rounded-lg p-4 hover:bg-gray-50">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <h4 className="font-medium text-gray-900">{plan.name}</h4>
-                        <p className="text-sm text-gray-600 mt-1">{plan.description || 'No description'}</p>
-                        <p className="text-xs text-gray-500 mt-2">
-                          {plan.total_groups} groups • {new Date(plan.created_at).toLocaleDateString()}
-                        </p>
-                        </div>
-                        <button
-                        onClick={() => applyStructuredPlan(plan.id)}
-                          disabled={isGeneratingGroups}
-                        className="ml-4 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 py-1 px-3 rounded"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Validation Summary */}
         {validationResults && (
           <div className={`bg-white rounded-lg shadow-sm border mb-6 ${validationResults.is_valid ? 'border-green-200' : 'border-red-200'}`}>
@@ -952,47 +988,50 @@ function GroupManagement() {
         </div>
       )}
 
-      {/* Save Plan Modal */}
-      {showSavePlanModal && (
+      {/* Save Final Results Modal */}
+      {showSaveGroupModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-medium mb-4">Save Structured Plan</h3>
+            <h3 className="text-lg font-medium mb-4">Save Final Results</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Save your grouped results to view later in the Saved Groups tab.
+            </p>
             <input
               type="text"
-              placeholder="Plan name"
+              placeholder="Group name (required)"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
               className="w-full border rounded px-3 py-2 mb-4"
-              id="planNameInput"
             />
             <textarea
               placeholder="Description (optional)"
+              value={groupDescription}
+              onChange={(e) => setGroupDescription(e.target.value)}
               className="w-full border rounded px-3 py-2 mb-4"
               rows="3"
-              id="planDescriptionInput"
             />
             <div className="flex justify-end space-x-2">
               <button
-                onClick={() => setShowSavePlanModal(false)}
+                onClick={() => {
+                  setShowSaveGroupModal(false);
+                  setGroupName('');
+                  setGroupDescription('');
+                }}
                 className="btn-secondary"
-                disabled={isSavingPlan}
+                disabled={isSavingFinalResults}
               >
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  const nameInput = document.getElementById('planNameInput');
-                  const descInput = document.getElementById('planDescriptionInput');
-                  if (nameInput.value.trim()) {
-                    saveStructuredPlan(nameInput.value.trim(), descInput.value.trim());
-                  }
-                }}
-                className="btn-primary"
-                disabled={isSavingPlan}
+                onClick={saveGroupWithName}
+                className="btn-success"
+                disabled={isSavingFinalResults || !groupName.trim()}
               >
-                {isSavingPlan ? 'Saving...' : 'Save Plan'}
+                {isSavingFinalResults ? 'Saving...' : 'Save'}
               </button>
             </div>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );

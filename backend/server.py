@@ -98,6 +98,19 @@ os.makedirs(CHARTS_EXPORT_PATH, exist_ok=True)
 # Initialize OpenAI client
 openai.api_key = OPENAI_API_KEY
 
+def ensure_json_serializable(obj):
+    """Recursively convert numpy types to Python types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {key: ensure_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [ensure_json_serializable(item) for item in obj]
+    elif hasattr(obj, 'item'):  # numpy types
+        return obj.item()
+    elif isinstance(obj, (pd.Int64Dtype, pd.Float64Dtype)) or str(type(obj)).startswith('numpy'):
+        return obj.item() if hasattr(obj, 'item') else int(obj)
+    else:
+        return obj
+
 # MongoDB connection
 client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
@@ -110,6 +123,8 @@ chat_collection = db.chat_history
 charts_collection = db.charts
 structured_plans_collection = db.structured_plans
 group_management_collection = db.group_management
+final_results_collection = db.final_results
+saved_groups_collection = db.saved_groups
 
 # Initialize grouping engine
 grouping_engine = ProductGroupingEngine(OPENAI_API_KEY)
@@ -551,6 +566,21 @@ class GroupUpdateRequest(BaseModel):
     target_group_id: Optional[str] = None  # Can be "ungrouped", "main_group_ungrouped", or group_id
     target_sub_group_id: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
+
+class FinalResultsData(BaseModel):
+    file_id: str
+    main_groups: List[Dict[str, Any]]
+    total_items: int
+    total_groups: int
+    created_at: str
+    estimated_total_savings: str
+
+class SavedGroupData(BaseModel):
+    name: str
+    description: str
+    structured_results: Dict[str, Any]
+    file_id: str
+    created_at: str
 
 @app.get("/")
 async def root():
@@ -1582,6 +1612,33 @@ async def generate_intelligent_groups(file_id: str):
         
         result = group_management_collection.insert_one(group_doc)
         
+        # Auto-save final results when intelligent grouping is complete
+        try:
+            structured_results = generate_structured_final_results(groups_data)
+            final_results_doc = {
+                "file_id": file_id,
+                "structured_results": structured_results,
+                "original_groups_data": groups_data,
+                "created_at": datetime.now(),
+                "version": "1.0",
+                "auto_generated": True
+            }
+            
+            # Save or update final results
+            existing_results = final_results_collection.find_one({"file_id": file_id})
+            if existing_results:
+                final_results_collection.replace_one(
+                    {"file_id": file_id},
+                    final_results_doc
+                )
+            else:
+                final_results_collection.insert_one(final_results_doc)
+            
+            print(f"Auto-saved final results for file {file_id}")
+        except Exception as auto_save_error:
+            print(f"Failed to auto-save final results: {str(auto_save_error)}")
+            # Don't fail the main operation if auto-save fails
+        
         # Convert to new format for frontend response
         new_format_data = convert_legacy_to_groups_format(groups_data)
         new_format_data["management_id"] = str(result.inserted_id)
@@ -1914,6 +1971,9 @@ async def generate_configured_groups(file_id: str, config: dict):
         
         print(f"🎉 SUCCESS: Generated {final_validation['counts']['main_groups']} main groups")
         print(f"📊 Total records: {len(df)} | Grouped: {final_validation['counts']['grouped_records']} | Ungrouped: {final_validation['counts']['ungrouped_records']}")
+        
+        # Ensure all data is JSON serializable
+        response_data = ensure_json_serializable(response_data)
         
         return response_data
         
@@ -2696,6 +2756,359 @@ async def test_openai_connection():
             "message": "Failed to test OpenAI connection",
             "error": str(e)
         }
+
+def generate_structured_final_results(groups_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate a structured final results list with unique groups and record counts"""
+    try:
+        final_results = {
+            "main_groups": [],
+            "total_items": 0,
+            "total_groups": 0,
+            "total_sub_groups": 0,
+            "ungrouped_items_count": 0,
+            "estimated_total_savings": "0%"
+        }
+        
+        # Handle both legacy and new format
+        main_groups = groups_data.get('main_groups', {})
+        ungrouped_items = groups_data.get('ungrouped_items', [])
+        
+        # Convert to legacy format if needed
+        if not main_groups and 'groups' in groups_data:
+            converted_data = convert_groups_to_legacy_format(groups_data)
+            main_groups = converted_data.get('main_groups', {})
+            ungrouped_items = converted_data.get('ungrouped_items', [])
+        
+        total_items = 0
+        total_sub_groups = 0
+        
+        # Process each main group
+        for group_id, group_info in main_groups.items():
+            main_group_data = {
+                "name": group_info.get('name', 'Unnamed Group'),
+                "sub_groups": [],
+                "total_items": 0,
+                "estimated_savings": group_info.get('estimated_savings', '0%')
+            }
+            
+            # Process sub groups
+            sub_groups = group_info.get('sub_groups', {})
+            for sub_group_id, sub_group_info in sub_groups.items():
+                items = sub_group_info.get('items', [])
+                
+                # Count unique items with their quantities
+                unique_items = {}
+                for item in items:
+                    item_name = item.get('name', 'Unknown Item')
+                    # Use the original name as key to maintain case and formatting
+                    item_key = item_name.strip()
+                    
+                    if item_key in unique_items:
+                        # If item has a count field, use it; otherwise add quantity
+                        item_count = item.get('count', item.get('quantity', 1))
+                        unique_items[item_key]['count'] += item_count
+                    else:
+                        unique_items[item_key] = {
+                            'name': item_name,
+                            'count': item.get('count', item.get('quantity', 1)),
+                            'price': item.get('price', 0),
+                            'category': item.get('category', 'Unknown')
+                        }
+                
+                # Convert to list format for final results - sorted by count descending
+                sub_group_items = []
+                sub_group_total_items = 0
+                for unique_item in sorted(unique_items.values(), key=lambda x: (-x['count'], x['name'])):
+                    sub_group_items.append({
+                        "name": unique_item['name'],
+                        "count": unique_item['count']
+                    })
+                    sub_group_total_items += unique_item['count']
+                
+                if sub_group_items:  # Only add sub-groups with items
+                    sub_group_data = {
+                        "name": sub_group_info.get('name', 'Unnamed Sub Group'),
+                        "items": sub_group_items,
+                        "total_items": sub_group_total_items
+                    }
+                    main_group_data["sub_groups"].append(sub_group_data)
+                    main_group_data["total_items"] += sub_group_total_items
+                    total_sub_groups += 1
+            
+            if main_group_data["sub_groups"]:  # Only add main groups with sub-groups
+                final_results["main_groups"].append(main_group_data)
+                total_items += main_group_data["total_items"]
+        
+        # Calculate totals
+        final_results["total_items"] = total_items + len(ungrouped_items)
+        final_results["total_groups"] = len(final_results["main_groups"])
+        final_results["total_sub_groups"] = total_sub_groups
+        final_results["ungrouped_items_count"] = len(ungrouped_items)
+        
+        # Calculate estimated total savings (average of all group savings)
+        if final_results["main_groups"]:
+            total_savings = 0
+            savings_count = 0
+            for group in final_results["main_groups"]:
+                savings_str = group.get("estimated_savings", "0%")
+                try:
+                    savings_num = float(savings_str.replace('%', ''))
+                    total_savings += savings_num
+                    savings_count += 1
+                except:
+                    pass
+            
+            if savings_count > 0:
+                avg_savings = total_savings / savings_count
+                final_results["estimated_total_savings"] = f"{avg_savings:.0f}%"
+        
+        return final_results
+        
+    except Exception as e:
+        print(f"Error generating structured final results: {str(e)}")
+        return {
+            "main_groups": [],
+            "total_items": 0,
+            "total_groups": 0,
+            "total_sub_groups": 0,
+            "ungrouped_items_count": 0,
+            "estimated_total_savings": "0%",
+            "error": str(e)
+        }
+
+@app.post("/api/final-results/save/{file_id}")
+async def save_final_results(file_id: str):
+    """Save the current grouping results as final results"""
+    try:
+        # Get the current group management data
+        group_doc = group_management_collection.find_one({"file_id": file_id})
+        if not group_doc:
+            raise HTTPException(status_code=404, detail="No group data found for this file")
+        
+        groups_data = group_doc.get('groups_data', {})
+        
+        # Generate structured final results
+        structured_results = generate_structured_final_results(groups_data)
+        
+        # Prepare final results document
+        final_results_doc = {
+            "file_id": file_id,
+            "structured_results": structured_results,
+            "original_groups_data": groups_data,
+            "created_at": datetime.now(),
+            "version": "1.0"
+        }
+        
+        # Save or update final results
+        existing_results = final_results_collection.find_one({"file_id": file_id})
+        if existing_results:
+            final_results_collection.replace_one(
+                {"file_id": file_id},
+                final_results_doc
+            )
+            result_id = existing_results["_id"]
+        else:
+            result = final_results_collection.insert_one(final_results_doc)
+            result_id = result.inserted_id
+        
+        return {
+            "status": "success",
+            "message": "Final results saved successfully",
+            "result_id": str(result_id),
+            "structured_results": structured_results
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving final results: {str(e)}")
+
+@app.get("/api/final-results/{file_id}")
+async def get_final_results(file_id: str):
+    """Get the saved final results for a file"""
+    try:
+        # Get saved final results
+        final_results_doc = final_results_collection.find_one({"file_id": file_id})
+        if not final_results_doc:
+            raise HTTPException(status_code=404, detail="No final results found for this file")
+        
+        # Convert ObjectId to string for JSON serialization
+        final_results_doc["_id"] = str(final_results_doc["_id"])
+        
+        return {
+            "status": "success",
+            "final_results": final_results_doc
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving final results: {str(e)}")
+
+@app.get("/api/final-results/structured/{file_id}")
+async def get_structured_final_results(file_id: str):
+    """Get a structured list of final results suitable for display"""
+    try:
+        # Get saved final results
+        final_results_doc = final_results_collection.find_one({"file_id": file_id})
+        if not final_results_doc:
+            # Try to generate from current group data if no saved results
+            group_doc = group_management_collection.find_one({"file_id": file_id})
+            if not group_doc:
+                raise HTTPException(status_code=404, detail="No group data or final results found for this file")
+            
+            groups_data = group_doc.get('groups_data', {})
+            structured_results = generate_structured_final_results(groups_data)
+        else:
+            structured_results = final_results_doc.get('structured_results', {})
+        
+        return {
+            "status": "success",
+            "file_id": file_id,
+            "structured_results": structured_results,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving structured final results: {str(e)}")
+
+@app.delete("/api/final-results/{file_id}")
+async def delete_final_results(file_id: str):
+    """Delete the saved final results for a file"""
+    try:
+        result = final_results_collection.delete_one({"file_id": file_id})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="No final results found for this file")
+        
+        return {
+            "status": "success",
+            "message": "Final results deleted successfully"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting final results: {str(e)}")
+
+# Saved Groups Endpoints
+@app.post("/api/saved-groups")
+async def save_group_with_name(data: SavedGroupData):
+    """Save a group with user-provided name and description"""
+    try:
+        # Create the saved group document
+        saved_group_doc = {
+            "name": data.name,
+            "description": data.description,
+            "structured_results": data.structured_results,
+            "file_id": data.file_id,
+            "created_at": data.created_at,
+            "saved_at": datetime.now().isoformat()
+        }
+        
+        # Save to database
+        result = saved_groups_collection.insert_one(saved_group_doc)
+        
+        return {
+            "status": "success",
+            "message": "Group saved successfully",
+            "group_id": str(result.inserted_id)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving group: {str(e)}")
+
+@app.get("/api/saved-groups")
+async def get_saved_groups():
+    """Get all saved groups with summary information"""
+    try:
+        saved_groups = list(saved_groups_collection.find(
+            {},
+            {
+                "_id": 1,
+                "name": 1,
+                "description": 1,
+                "file_id": 1,
+                "created_at": 1,
+                "saved_at": 1,
+                "structured_results": 1
+            }
+        ).sort("saved_at", -1))
+        
+        # Enhance each group with file name and summary info
+        for group in saved_groups:
+            group["_id"] = str(group["_id"])
+            
+            # Try to get file name
+            file_meta = files_collection.find_one({"file_id": group.get("file_id")})
+            if file_meta:
+                group["file_name"] = file_meta.get("filename", "Unknown File")
+            else:
+                group["file_name"] = "Unknown File"
+            
+            # Add structured results summary if available
+            if "structured_results" not in group:
+                group["structured_results"] = {
+                    "total_items": 0,
+                    "total_groups": 0,
+                    "total_sub_groups": 0,
+                    "estimated_total_savings": "0%"
+                }
+        
+        return {
+            "status": "success",
+            "saved_groups": saved_groups
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving saved groups: {str(e)}")
+
+@app.get("/api/saved-groups/{group_id}")
+async def get_saved_group_details(group_id: str):
+    """Get detailed information for a specific saved group"""
+    try:
+        from bson import ObjectId
+        
+        # Validate ObjectId format
+        if not ObjectId.is_valid(group_id):
+            raise HTTPException(status_code=400, detail="Invalid group ID format")
+        
+        saved_group = saved_groups_collection.find_one({"_id": ObjectId(group_id)})
+        
+        if not saved_group:
+            raise HTTPException(status_code=404, detail="Saved group not found")
+        
+        # Convert ObjectId to string for JSON serialization
+        saved_group["_id"] = str(saved_group["_id"])
+        
+        return {
+            "status": "success",
+            "saved_group": saved_group
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving saved group: {str(e)}")
+
+@app.delete("/api/saved-groups/{group_id}")
+async def delete_saved_group(group_id: str):
+    """Delete a saved group"""
+    try:
+        from bson import ObjectId
+        
+        # Validate ObjectId format
+        if not ObjectId.is_valid(group_id):
+            raise HTTPException(status_code=400, detail="Invalid group ID format")
+        
+        result = saved_groups_collection.delete_one({"_id": ObjectId(group_id)})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Saved group not found")
+        
+        return {
+            "status": "success",
+            "message": "Saved group deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting saved group: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

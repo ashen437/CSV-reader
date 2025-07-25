@@ -565,12 +565,40 @@ function App() {
                             {group.subgroups && Object.keys(group.subgroups).length > 0 && (
                               <div className="mt-3 pl-4 border-l-2 border-gray-200">
                                 <p className="text-xs font-medium text-gray-700 mb-2">Subgroups:</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {Object.entries(group.subgroups).map(([subName, subItems]) => (
-                                    <span key={subName} className="inline-flex items-center px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
-                                      {subName} ({subItems?.length})
-                                    </span>
-                                  ))}
+                                <div className="space-y-3">
+                                  {Object.entries(group.subgroups).map(([subName, subItems]) => {
+                                    // Count unique items in this subgroup
+                                    const itemCounts = {};
+                                    if (Array.isArray(subItems)) {
+                                      subItems.forEach(item => {
+                                        const itemName = typeof item === 'string' ? item : (item?.name || item?.description || JSON.stringify(item));
+                                        itemCounts[itemName] = (itemCounts[itemName] || 0) + 1;
+                                      });
+                                    }
+                                    
+                                    return (
+                                      <div key={subName} className="bg-gray-50 rounded-lg p-3">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <h4 className="text-sm font-medium text-gray-800">{subName}</h4>
+                                          <span className="text-xs text-gray-600">
+                                            {Object.keys(itemCounts).length} unique items, {subItems?.length} total
+                                          </span>
+                                        </div>
+                                        <div className="space-y-1">
+                                          {Object.entries(itemCounts).map(([itemName, count]) => (
+                                            <div key={itemName} className="flex items-center justify-between text-xs">
+                                              <span className="text-gray-700 truncate pr-2" title={itemName}>
+                                                {itemName.length > 40 ? `${itemName.substring(0, 40)}...` : itemName}
+                                              </span>
+                                              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-medium">
+                                                {count}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}

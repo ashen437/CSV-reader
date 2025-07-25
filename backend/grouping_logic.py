@@ -1,3 +1,4 @@
+# Backup of original grouping_logic.py - created before implementing new advanced logic
 """
 Advanced Grouping Logic for CSV Processing Dashboard
 Handles intelligent product grouping with main groups, sub groups, and structured plans
@@ -8,6 +9,7 @@ import pandas as pd
 import json
 import re
 import os
+import traceback
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 import uuid
@@ -424,7 +426,7 @@ class ProductGroupingEngine:
                 sub_groups[sub_group_id] = {
                     "id": sub_group_id,
                     "name": sub_group_name,
-                    "items": sub_group_items
+                    "items": self.convert_items_to_unique_with_counts(sub_group_items)
                 }
         
         # Ensure we have at least a default sub-group
@@ -432,7 +434,7 @@ class ProductGroupingEngine:
             sub_groups["default"] = {
                 "id": str(uuid.uuid4()),
                 "name": "Default",
-                "items": items
+                "items": self.convert_items_to_unique_with_counts(items)
             }
         
         return sub_groups
@@ -602,6 +604,19 @@ class ProductGroupingEngine:
             return float(str(value).replace(',', '').replace('$', '').strip())
         except (ValueError, TypeError):
             return default
+
+    def safe_json_int(self, value, default=1):
+        """Safely convert value to int for JSON serialization"""
+        try:
+            if pd.isna(value) or value == '':
+                return int(default)
+            # Handle numpy types
+            if hasattr(value, 'item'):
+                value = value.item()
+            # Ensure it's a Python int, not numpy int
+            return int(float(str(value).replace(',', '').strip()))
+        except (ValueError, TypeError):
+            return int(default)
 
     def safe_int(self, value, default=1):
         """Safely convert value to int"""
@@ -1074,91 +1089,64 @@ class ProductGroupingEngine:
                             continue
                         
                         sub_group_name = self.clean_group_name(str(sub_value))
-                        sub_group_items = []
                         
-                        # Convert each row to an item
-                        for index, row in sub_group_df.iterrows():
-                            item = {
-                                'id': str(index),
-                                'name': str(row.get(sub_column, f'Item_{index}')),
-                                'price': self.safe_float(row.get('price', row.get('Price', 0))),
-                                'category': str(main_value),  # Main group becomes category
-                                'quantity': self.safe_int(row.get('quantity', row.get('Quantity', 1))),
-                                'count': 1,
-                                'row_data': {str(k): str(v) for k, v in row.to_dict().items()},
-                                'original_index': index
-                            }
-                            sub_group_items.append(item)
+                        # Create unique items list with counts for this sub-group
+                        sub_group_items = self.create_unique_items_with_counts(sub_group_df, sub_column, main_value)
                         
                         # Create sub-group
                         sub_group = {
                             'id': self.generate_group_id(),
                             'name': sub_group_name,
                             'items': sub_group_items,
-                            'count': len(sub_group_items),
+                            'count': self.safe_json_int(len(sub_group_df)),  # Total records
+                            'unique_items_count': self.safe_json_int(len(sub_group_items)),  # Unique items
                             'is_ungrouped_subgroup': False
                         }
                         
                         group['sub_groups'].append(sub_group)
-                        print(f"    Sub-group '{sub_group_name}': {len(sub_group_items)} records")
+                        print(f"    Sub-group '{sub_group_name}': {len(sub_group_df)} records, {len(sub_group_items)} unique items")
                     
                     # Create "Ungrouped Items" sub-group for items without valid sub-group values
                     if ungrouped_items:
-                        ungrouped_sub_group_items = []
-                        for row_dict in ungrouped_items:
-                            item = {
-                                'id': str(row_dict.get('index', f"ungrouped_{len(ungrouped_sub_group_items)}")),
-                                'name': str(row_dict.get(sub_column, f'Ungrouped_Item_{len(ungrouped_sub_group_items)}')),
-                                'price': self.safe_float(row_dict.get('price', row_dict.get('Price', 0))),
-                                'category': str(main_value),
-                                'quantity': self.safe_int(row_dict.get('quantity', row_dict.get('Quantity', 1))),
-                                'count': 1,
-                                'row_data': {str(k): str(v) for k, v in row_dict.items()},
-                                'original_index': row_dict.get('index', f"ungrouped_{len(ungrouped_sub_group_items)}")
-                            }
-                            ungrouped_sub_group_items.append(item)
+                        # Create DataFrame from ungrouped items for processing
+                        ungrouped_df = pd.DataFrame(ungrouped_items)
+                        
+                        # Create unique items list with counts for ungrouped items
+                        ungrouped_sub_group_items = self.create_unique_items_with_counts(ungrouped_df, sub_column, main_value)
                         
                         ungrouped_sub_group = {
                             'id': self.generate_group_id(),
                             'name': 'Ungrouped Items',
                             'items': ungrouped_sub_group_items,
-                            'count': len(ungrouped_sub_group_items),
+                            'count': self.safe_json_int(len(ungrouped_items)),  # Total records
+                            'unique_items_count': self.safe_json_int(len(ungrouped_sub_group_items)),  # Unique items
                             'is_ungrouped_subgroup': True
                         }
                         group['sub_groups'].append(ungrouped_sub_group)
-                        print(f"    Ungrouped Items sub-group: {len(ungrouped_sub_group_items)} records")
+                        print(f"    Ungrouped Items sub-group: {len(ungrouped_items)} records, {len(ungrouped_sub_group_items)} unique items")
                 
                 else:
                     # No sub-column specified, put all items directly in main group
-                    main_group_items = []
-                    for index, row in main_group_df.iterrows():
-                        item = {
-                            'id': str(index),
-                            'name': str(row.iloc[0] if len(row) > 0 else f'Item_{index}'),  # First column as name
-                            'price': self.safe_float(row.get('price', row.get('Price', 0))),
-                            'category': str(main_value),
-                            'quantity': self.safe_int(row.get('quantity', row.get('Quantity', 1))),
-                            'count': 1,
-                            'row_data': {str(k): str(v) for k, v in row.to_dict().items()},
-                            'original_index': index
-                        }
-                        main_group_items.append(item)
+                    # Create unique items list with counts for the main group
+                    main_group_items = self.create_unique_items_with_counts(main_group_df, main_column, main_value, use_first_column_as_name=True)
                     
                     # Create a default sub-group to maintain structure
                     default_sub_group = {
                         'id': self.generate_group_id(),
                         'name': 'All Items',
                         'items': main_group_items,
-                        'count': len(main_group_items),
+                        'count': self.safe_json_int(len(main_group_df)),  # Total records
+                        'unique_items_count': self.safe_json_int(len(main_group_items)),  # Unique items
                         'is_ungrouped_subgroup': False
                     }
+                    
                     group['sub_groups'].append(default_sub_group)
-                    print(f"    Default sub-group 'All Items': {len(main_group_items)} records")
+                    print(f"  Main group items: {len(main_group_df)} records, {len(main_group_items)} unique items")
                 
                 # Update group total count
                 total_items_in_group = sum(sg['count'] for sg in group['sub_groups'])
-                group['count'] = total_items_in_group
-                group['item_count'] = total_items_in_group
+                group['count'] = self.safe_json_int(total_items_in_group)
+                group['item_count'] = self.safe_json_int(total_items_in_group)
                 group['estimated_savings'] = self.calculate_estimated_savings(
                     [item for sg in group['sub_groups'] for item in sg['items']]
                 )
@@ -1193,27 +1181,16 @@ class ProductGroupingEngine:
             group_name = self.clean_group_name(str(value))
             print(f"Creating group: '{group_name}' with {len(group_df)} records")
             
-            # Convert all rows in this group to items
-            group_items = []
-            for index, row in group_df.iterrows():
-                item = {
-                    'id': str(index),
-                    'name': str(row.get(column, f'Item_{index}')),  # Use the column value as item name
-                    'price': self.safe_float(row.get('price', row.get('Price', 0))),
-                    'category': str(value),  # Group value becomes category
-                    'quantity': self.safe_int(row.get('quantity', row.get('Quantity', 1))),
-                    'count': 1,
-                    'row_data': {str(k): str(v) for k, v in row.to_dict().items()},
-                    'original_index': index
-                }
-                group_items.append(item)
+            # Create unique items list with counts for this group
+            group_items = self.create_unique_items_with_counts(group_df, column, value)
             
-            # Create a single sub-group containing all items
+            # Create a single sub-group containing all unique items
             sub_group = {
                 'id': self.generate_group_id(),
                 'name': 'All Items',
                 'items': group_items,
-                'count': len(group_items),
+                'count': self.safe_json_int(len(group_df)),  # Total records
+                'unique_items_count': self.safe_json_int(len(group_items)),  # Unique items
                 'is_ungrouped_subgroup': False
             }
             
@@ -1224,16 +1201,121 @@ class ProductGroupingEngine:
                 'enabled': True,
                 'sub_groups': [sub_group],
                 'items': [],  # All items are in sub-groups
-                'count': len(group_items),
-                'item_count': len(group_items),
+                'count': self.safe_json_int(len(group_df)),  # Total records
+                'unique_items_count': self.safe_json_int(len(group_items)),  # Unique items
+                'item_count': self.safe_json_int(len(group_df)),
                 'estimated_savings': self.calculate_estimated_savings(group_items)
             }
             
             groups.append(group)
-            print(f"Group '{group_name}' created: {len(group_items)} records")
+            print(f"Group '{group_name}' created: {len(group_df)} records, {len(group_items)} unique items")
         
         print(f"Created {len(groups)} groups from ALL {len(df)} records in column '{column}'")
         return groups
+
+    def create_unique_items_with_counts(self, df: pd.DataFrame, item_name_column: str, category_value, use_first_column_as_name=False):
+        """
+        Create a list of unique items with their counts from a DataFrame
+        
+        Args:
+            df: DataFrame containing the items
+            item_name_column: Column to use as item name
+            category_value: Category value for all items
+            use_first_column_as_name: If True, use first column as item name instead of item_name_column
+        
+        Returns:
+            List of unique items with counts
+        """
+        unique_items = []
+        
+        # Determine which column to use for item names
+        if use_first_column_as_name and len(df.columns) > 0:
+            name_column = df.columns[0]
+        else:
+            name_column = item_name_column
+        
+        # Group by the name column to count occurrences
+        if name_column in df.columns:
+            # Count occurrences of each unique value
+            item_counts = df[name_column].value_counts()
+            
+            # Create items with counts
+            for item_name, count in item_counts.items():
+                # Skip null/empty values
+                if pd.isna(item_name) or str(item_name).strip() == '':
+                    continue
+                
+                # Get a sample row for this item to extract other data
+                sample_row = df[df[name_column] == item_name].iloc[0]
+                
+                # Create unique item with count
+                item = {
+                    'id': f"{category_value}_{self.clean_group_name(str(item_name))}",
+                    'name': str(item_name),
+                    'price': self.safe_float(sample_row.get('price', sample_row.get('Price', 0))),
+                    'category': str(category_value),
+                    'quantity': self.safe_int(sample_row.get('quantity', sample_row.get('Quantity', 1))),
+                    'count': self.safe_json_int(count),  # Number of occurrences - ensure JSON serializable
+                    'row_data': {str(k): str(v) for k, v in sample_row.to_dict().items()},
+                    'sample_row_index': self.safe_json_int(sample_row.name)
+                }
+                unique_items.append(item)
+        
+        # Sort by count (descending) then by name
+        unique_items.sort(key=lambda x: (-x['count'], x['name']))
+        
+        return unique_items
+
+    def convert_items_to_unique_with_counts(self, items: List[Dict]) -> List[Dict]:
+        """
+        Convert a list of items to unique items with counts
+        Used for AI-powered grouping where items are already processed
+        
+        Args:
+            items: List of item dictionaries
+            
+        Returns:
+            List of unique items with counts
+        """
+        if not items:
+            return []
+        
+        # Group items by name and count occurrences
+        item_counts = {}
+        item_samples = {}
+        
+        for item in items:
+            item_name = str(item.get('name', ''))
+            if not item_name.strip():
+                continue
+                
+            if item_name not in item_counts:
+                item_counts[item_name] = 0
+                item_samples[item_name] = item  # Keep first occurrence as sample
+            
+            item_counts[item_name] += 1
+        
+        # Create unique items list
+        unique_items = []
+        for item_name, count in item_counts.items():
+            sample_item = item_samples[item_name]
+            
+            unique_item = {
+                'id': sample_item.get('id', f"item_{len(unique_items)}"),
+                'name': item_name,
+                'price': self.safe_float(sample_item.get('price', 0.0)),
+                'category': str(sample_item.get('category', 'Unknown')),
+                'quantity': self.safe_int(sample_item.get('quantity', 1)),
+                'count': self.safe_json_int(count),  # Number of occurrences - ensure JSON serializable
+                'row_data': sample_item.get('row_data', {}),
+                'original_index': sample_item.get('original_index', sample_item.get('id'))
+            }
+            unique_items.append(unique_item)
+        
+        # Sort by count (descending) then by name
+        unique_items.sort(key=lambda x: (-x['count'], x['name']))
+        
+        return unique_items
 
     def assign_item_to_intelligent_group(self, item: Dict, groups: List[Dict], main_column: str, sub_column: str):
         """Assign an item to a group using intelligent product matching"""
@@ -2352,11 +2434,8 @@ Create logical groups that procurement teams can actually use for bulk purchasin
                 # Get all rows with this value
                 value_rows = df[df[column_name] == unique_value]
                 
-                # Create items for this group
-                items = []
-                for index, row in value_rows.iterrows():
-                    item = self.create_item_from_row(row, index, str(unique_value), str(unique_value))
-                    items.append(item)
+                # Create unique items list with counts for this group
+                unique_items = self.create_unique_items_with_counts(value_rows, column_name, unique_value, use_first_column_as_name=True)
                 
                 # Create main group
                 group = {
@@ -2368,27 +2447,30 @@ Create logical groups that procurement teams can actually use for bulk purchasin
                     'sub_groups': [{
                         'id': self.generate_group_id(),
                         'name': f"{unique_value} Items",
-                        'items': items,
-                        'count': len(items),
-                        'item_count': len(items)
+                        'items': unique_items,
+                        'count': self.safe_json_int(len(value_rows)),  # Total records
+                        'unique_items_count': self.safe_json_int(len(unique_items)),  # Unique items
+                        'item_count': self.safe_json_int(len(value_rows))
                     }],
-                    'count': len(items),
-                    'item_count': len(items),
-                    'estimated_savings': f"{min(30, len(items) * 2)}%"
+                    'count': self.safe_json_int(len(value_rows)),
+                    'unique_items_count': self.safe_json_int(len(unique_items)),
+                    'item_count': self.safe_json_int(len(value_rows)),
+                    'estimated_savings': f"{min(30, len(value_rows) * 2)}%"
                 }
                 
                 groups.append(group)
-                total_grouped_items += len(items)
+                total_grouped_items += len(value_rows)  # Count actual records, not unique items
                 
-                print(f"Created group '{unique_value}' with {len(items)} items")
+                print(f"Created group '{unique_value}' with {len(value_rows)} records, {len(unique_items)} unique items")
             
             # Handle ungrouped items (null/empty values)
             ungrouped_items = []
             null_rows = df[pd.isna(df[column_name]) | (df[column_name].astype(str).str.strip() == '')]
             
-            for index, row in null_rows.iterrows():
-                item = self.create_item_from_row(row, index, 'Ungrouped', 'No Value')
-                ungrouped_items.append(item)
+            if len(null_rows) > 0:
+                # Create unique items list for ungrouped items
+                ungrouped_unique_items = self.create_unique_items_with_counts(null_rows, column_name, 'Ungrouped', use_first_column_as_name=True)
+                ungrouped_items = ungrouped_unique_items
             
             # Calculate validation
             validation_results = self.validate_and_count_groups(groups, len(df))
@@ -2867,19 +2949,18 @@ Create logical groups that procurement teams can actually use for bulk purchasin
                         continue
                         
                     matching_rows = df[df[sub_column] == value]
-                    group_items = []
                     
-                    for index, row in matching_rows.iterrows():
-                        item = self.create_item_from_row(row, index, str(value), value)
-                        group_items.append(item)
+                    # Create unique items list with counts for this value
+                    group_items = self.create_unique_items_with_counts(matching_rows, sub_column, value)
                     
                     if group_items:
                         sub_group = {
                             'id': self.generate_group_id(),
                             'name': self.normalize_product_name(str(value)),
                             'items': group_items,
-                            'count': len(group_items),
-                            'item_count': len(group_items),
+                            'count': self.safe_json_int(len(matching_rows)),  # Total records
+                            'unique_items_count': self.safe_json_int(len(group_items)),  # Unique items
+                            'item_count': self.safe_json_int(len(matching_rows)),
                             'is_value_based': True
                         }
                         sub_groups.append(sub_group)
@@ -2902,22 +2983,20 @@ Create logical groups that procurement teams can actually use for bulk purchasin
         try:
             print(f"🛡️ Creating default sub-group for '{group_name}'")
             
-            items = []
-            for index, row in df.iterrows():
-                sub_value = str(row.get(sub_column, '')) if pd.notna(row.get(sub_column)) else 'Unknown'
-                item = self.create_item_from_row(row, index, group_name, sub_value)
-                items.append(item)
+            # Create unique items list with counts for the default sub-group
+            items = self.create_unique_items_with_counts(df, sub_column, group_name, use_first_column_as_name=True)
             
             if items:
                 default_sub_group = {
                     'id': self.generate_group_id(),
                     'name': f"All {group_name} Items",
                     'items': items,
-                    'count': len(items),
-                    'item_count': len(items),
+                    'count': len(df),  # Total records
+                    'unique_items_count': len(items),  # Unique items
+                    'item_count': len(df),
                     'is_default_fallback': True
                 }
-                print(f"✅ Created default sub-group with {len(items)} items")
+                print(f"✅ Created default sub-group with {len(df)} records, {len(items)} unique items")
                 return default_sub_group
             else:
                 print(f"❌ No items found for default sub-group")
@@ -3174,7 +3253,7 @@ Focus on creating MANY meaningful sub-groups based on IDENTICAL CORE PRODUCT FUN
                 print(f"   Creating sub-group: '{group_name}' with {len(planned_values)} planned values")
                 
                 # Find all rows that match the planned values
-                group_items = []
+                matching_rows_list = []
                 for value in planned_values:
                     # Find exact matches first
                     matching_rows = df[df[sub_column] == value]
@@ -3190,23 +3269,30 @@ Focus on creating MANY meaningful sub-groups based on IDENTICAL CORE PRODUCT FUN
                                     print(f"     🔍 Fuzzy matched '{value}' → '{actual_value}'")
                                     break
                     
-                    for index, row in matching_rows.iterrows():
-                        original_value = row[sub_column]
-                        item = self.create_item_from_row(row, index, group_name, original_value)
-                        group_items.append(item)
-                        used_values.add(original_value)
+                    if len(matching_rows) > 0:
+                        matching_rows_list.append(matching_rows)
+                        for actual_value in matching_rows[sub_column].unique():
+                            used_values.add(actual_value)
+                
+                # Combine all matching rows for this group
+                if matching_rows_list:
+                    combined_rows = pd.concat(matching_rows_list, ignore_index=True)
+                    
+                    # Create unique items list with counts for this sub-group
+                    group_items = self.create_unique_items_with_counts(combined_rows, sub_column, group_name)
                 
                 if group_items:
                     sub_group = {
                         'id': self.generate_group_id(),
                         'name': group_name,
                         'items': group_items,
-                        'count': len(group_items),
-                        'item_count': len(group_items),
+                        'count': self.safe_json_int(len(combined_rows)),  # Total records
+                        'unique_items_count': self.safe_json_int(len(group_items)),  # Unique items
+                        'item_count': self.safe_json_int(len(combined_rows)),
                         'reasoning': group_plan.get('reasoning', 'AI-grouped by core product type')
                     }
                     sub_groups.append(sub_group)
-                    print(f"     ✅ Created '{group_name}' with {len(group_items)} items")
+                    print(f"     ✅ Created '{group_name}' with {len(combined_rows)} records, {len(group_items)} unique items")
             
             print(f"📊 Applied AI plan: {len(sub_groups)} sub-groups created")
             print(f"📊 Used {len(used_values)} unique values")
@@ -3237,20 +3323,20 @@ Focus on creating MANY meaningful sub-groups based on IDENTICAL CORE PRODUCT FUN
             print(f"🗂️  Found {len(unused_values)} ungrouped values for 'Other Items' sub-group")
             
             if unused_values:
-                other_items = []
-                for value in unused_values:
-                    matching_rows = df[df[sub_column] == value]
-                    for index, row in matching_rows.iterrows():
-                        item = self.create_item_from_row(row, index, 'Other Items', str(value))
-                        other_items.append(item)
+                # Get all rows with unused values
+                unused_rows = df[df[sub_column].isin(unused_values)]
                 
-                if other_items:
+                if len(unused_rows) > 0:
+                    # Create unique items list with counts for other items
+                    other_items = self.create_unique_items_with_counts(unused_rows, sub_column, 'Other Items')
+                    
                     other_sub_group = {
                         'id': self.generate_group_id(),
                         'name': 'Other Items',
                         'items': other_items,
-                        'count': len(other_items),
-                        'item_count': len(other_items),
+                        'count': self.safe_json_int(len(unused_rows)),  # Total records
+                        'unique_items_count': self.safe_json_int(len(other_items)),  # Unique items
+                        'item_count': self.safe_json_int(len(unused_rows)),
                         'is_other_items': True
                     }
                     existing_sub_groups.append(other_sub_group)

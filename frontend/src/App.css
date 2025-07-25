@@ -103,6 +103,23 @@
   background-color: #b91c1c;
 }
 
+.btn-success {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #059669;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+}
+
+.btn-success:hover {
+  background-color: #047857;
+}
+
 /* Status badge styles */
 .status-uploaded {
   background-color: #dbeafe;
