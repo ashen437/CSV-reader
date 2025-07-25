@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import pandas as pd
 import pymongo
 from pymongo import MongoClient
@@ -3109,6 +3109,117 @@ async def delete_saved_group(group_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting saved group: {str(e)}")
+
+@app.get("/api/saved-groups/{group_id}/export-excel")
+async def export_saved_group_to_excel(group_id: str):
+    """Export a saved group to Excel format with main groups, sub groups, and items"""
+    try:
+        from bson import ObjectId
+        
+        # Validate ObjectId format
+        if not ObjectId.is_valid(group_id):
+            raise HTTPException(status_code=400, detail="Invalid group ID format")
+        
+        # Get the saved group
+        saved_group = saved_groups_collection.find_one({"_id": ObjectId(group_id)})
+        
+        if not saved_group:
+            raise HTTPException(status_code=404, detail="Saved group not found")
+        
+        # Create Excel workbook
+        output = BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Main data sheet with groups, sub groups, and items
+            export_data = []
+            structured_results = saved_group.get('structured_results', {})
+            main_groups = structured_results.get('main_groups', [])
+            
+            # Handle both list and dict structures for main_groups
+            if isinstance(main_groups, dict):
+                main_groups = list(main_groups.values())
+            elif not isinstance(main_groups, list):
+                main_groups = []
+            
+            for main_group in main_groups:
+                if not isinstance(main_group, dict):
+                    continue
+                    
+                main_group_name = main_group.get('name', 'Unknown Main Group')
+                sub_groups = main_group.get('sub_groups', [])
+                
+                # Handle both list and dict structures for sub_groups
+                if isinstance(sub_groups, dict):
+                    sub_groups = list(sub_groups.values())
+                elif not isinstance(sub_groups, list):
+                    sub_groups = []
+                
+                for sub_group in sub_groups:
+                    if not isinstance(sub_group, dict):
+                        continue
+                        
+                    sub_group_name = sub_group.get('name', 'Unknown Sub Group')
+                    items = sub_group.get('items', [])
+                    
+                    if not isinstance(items, list):
+                        items = []
+                    
+                    if items:
+                        for item in items:
+                            if isinstance(item, dict):
+                                export_data.append({
+                                    'Main Group': main_group_name,
+                                    'Sub Group': sub_group_name,
+                                    'Item Name': item.get('name', 'Unknown Item'),
+                                    'Record Count': item.get('count', 1)
+                                })
+                    else:
+                        # Add a row even if no items to show the group structure
+                        export_data.append({
+                            'Main Group': main_group_name,
+                            'Sub Group': sub_group_name,
+                            'Item Name': 'No items',
+                            'Record Count': 0
+                        })
+            
+            # Create the main export sheet
+            if export_data:
+                export_df = pd.DataFrame(export_data)
+                export_df.to_excel(writer, sheet_name='Groups and Items', index=False)
+            else:
+                # Create empty sheet if no data
+                empty_df = pd.DataFrame({
+                    'Main Group': ['No data available'],
+                    'Sub Group': ['No data available'],
+                    'Item Name': ['No items found'],
+                    'Record Count': [0]
+                })
+                empty_df.to_excel(writer, sheet_name='Groups and Items', index=False)
+        
+        output.seek(0)
+        
+        # Create the filename - ensure it's safe for filesystem
+        safe_name = saved_group.get('name', 'group')
+        safe_name = ''.join(c for c in safe_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_name = safe_name.replace(' ', '_')
+        if not safe_name:
+            safe_name = 'export'
+        filename = f"{safe_name}_groups_export.xlsx"
+        
+        # Return as streaming response
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Error exporting to Excel: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error exporting to Excel: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

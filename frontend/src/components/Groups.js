@@ -10,11 +10,32 @@ function Groups() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Collapsible bars state
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
+  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState(false);
+  
+  // Export dropdown state
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
 
   // Fetch saved groups on component mount
   useEffect(() => {
     fetchSavedGroups();
   }, []);
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isExportDropdownOpen && !event.target.closest('.export-dropdown-container')) {
+        setIsExportDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isExportDropdownOpen]);
 
   const fetchSavedGroups = async () => {
     setIsLoading(true);
@@ -120,6 +141,72 @@ function Groups() {
     navigator.clipboard.writeText(text).then(() => {
       alert('Group data copied to clipboard!');
     });
+  };
+
+  const exportToExcel = async (group) => {
+    try {
+      console.log('Starting Excel export for group:', group.name);
+      
+      const response = await fetch(`${API_BASE_URL}/api/saved-groups/${group._id}/export-excel`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      });
+
+      console.log('Export response status:', response.status);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to export to Excel';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch (e) {
+          console.log('Could not parse error response as JSON');
+        }
+        throw new Error(errorMessage);
+      }
+
+      // Check if response is actually an Excel file
+      const contentType = response.headers.get('content-type');
+      console.log('Response content type:', contentType);
+      
+      if (!contentType || !contentType.includes('spreadsheet')) {
+        throw new Error('Server did not return an Excel file');
+      }
+
+      // Create a blob from the response
+      const blob = await response.blob();
+      console.log('Blob size:', blob.size, 'bytes');
+      
+      if (blob.size === 0) {
+        throw new Error('Received empty file from server');
+      }
+      
+      // Create a temporary URL for the blob
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create a temporary anchor element and trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${group.name.replace(/[^a-zA-Z0-9]/g, '_')}_export.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      console.log('Excel export completed successfully');
+      alert('Excel file downloaded successfully!');
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      });
+      alert(`Error exporting to Excel: ${error.message}`);
+    }
   };
 
   if (isLoading) {
@@ -235,43 +322,128 @@ function Groups() {
           <div className="flex-1 bg-white rounded-lg shadow-sm border overflow-hidden">
             {selectedGroup ? (
               <div className="h-full flex flex-col">
-                {/* Group Header */}
-                <div className="p-6 border-b bg-gray-50">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900">{selectedGroup.name}</h2>
-                      <p className="text-gray-600 mt-1">{selectedGroup.description || 'No description'}</p>
-                      <p className="text-sm text-gray-500 mt-2">
-                        Created: {formatDate(selectedGroup.created_at)} | 
-                        File: {selectedGroup.file_name || selectedGroup.file_id}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => copyToClipboard(selectedGroup)}
-                      className="btn-primary"
+                {/* Collapsible Group Header */}
+                <div className="border-b bg-gray-50">
+                  {/* Header Toggle Bar */}
+                  <div 
+                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
+                  >
+                    <h3 className="font-medium text-gray-900">Group Information</h3>
+                    <svg 
+                      className={`w-5 h-5 text-gray-500 transition-transform ${isHeaderCollapsed ? 'rotate-180' : ''}`}
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
                     >
-                      Copy to Clipboard
-                    </button>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
                   </div>
+                  
+                  {/* Collapsible Header Content */}
+                  {!isHeaderCollapsed && (
+                    <div className="px-6 pb-6">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <h2 className="text-xl font-bold text-gray-900">{selectedGroup.name}</h2>
+                          <p className="text-gray-600 mt-1">{selectedGroup.description || 'No description'}</p>
+                          <p className="text-sm text-gray-500 mt-2">
+                            Created: {formatDate(selectedGroup.created_at)} | 
+                            File: {selectedGroup.file_name || selectedGroup.file_id}
+                          </p>
+                        </div>
+                        
+                        {/* Export Dropdown */}
+                        <div className="relative ml-4 export-dropdown-container">
+                          <button
+                            onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+                            className="btn-primary flex items-center"
+                          >
+                            Export
+                            <svg 
+                              className={`ml-2 w-4 h-4 transition-transform ${isExportDropdownOpen ? 'rotate-180' : ''}`}
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          
+                          {/* Dropdown Menu */}
+                          {isExportDropdownOpen && (
+                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border z-10">
+                              <div className="py-1">
+                                <button
+                                  onClick={() => {
+                                    exportToExcel(selectedGroup);
+                                    setIsExportDropdownOpen(false);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                >
+                                  <svg className="w-4 h-4 mr-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  Export as Excel
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    copyToClipboard(selectedGroup);
+                                    setIsExportDropdownOpen(false);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                >
+                                  <svg className="w-4 h-4 mr-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V9a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                  </svg>
+                                  Copy to Clipboard
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Group Summary */}
-                <div className="p-6 border-b bg-blue-50">
-                  <h4 className="font-medium text-blue-900 mb-3">Summary</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Total Items:</span> {selectedGroup.structured_results?.total_items || 0}
-                    </div>
-                    <div>
-                      <span className="font-medium">Main Groups:</span> {selectedGroup.structured_results?.total_groups || 0}
-                    </div>
-                    <div>
-                      <span className="font-medium">Sub Groups:</span> {selectedGroup.structured_results?.total_sub_groups || 0}
-                    </div>
-                    <div>
-                      <span className="font-medium">Estimated Savings:</span> {selectedGroup.structured_results?.estimated_total_savings || '0%'}
-                    </div>
+                {/* Collapsible Group Summary */}
+                <div className="border-b bg-blue-50">
+                  {/* Summary Toggle Bar */}
+                  <div 
+                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-blue-100 transition-colors"
+                    onClick={() => setIsSummaryCollapsed(!isSummaryCollapsed)}
+                  >
+                    <h3 className="font-medium text-blue-900">Summary</h3>
+                    <svg 
+                      className={`w-5 h-5 text-blue-700 transition-transform ${isSummaryCollapsed ? 'rotate-180' : ''}`}
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
                   </div>
+                  
+                  {/* Collapsible Summary Content */}
+                  {!isSummaryCollapsed && (
+                    <div className="px-6 pb-6">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="font-medium">Total Items:</span> {selectedGroup.structured_results?.total_items || 0}
+                        </div>
+                        <div>
+                          <span className="font-medium">Main Groups:</span> {selectedGroup.structured_results?.total_groups || 0}
+                        </div>
+                        <div>
+                          <span className="font-medium">Sub Groups:</span> {selectedGroup.structured_results?.total_sub_groups || 0}
+                        </div>
+                        <div>
+                          <span className="font-medium">Estimated Savings:</span> {selectedGroup.structured_results?.estimated_total_savings || '0%'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Group Content */}
