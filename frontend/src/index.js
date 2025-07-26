@@ -7,6 +7,7 @@ import GroupManagement from "./components/GroupManagement";
 import GroupConfigurationPreview from "./components/GroupConfigurationPreview";
 import Groups from "./components/Groups";
 import EditGroups from "./components/EditGroups";
+import EditExports from "./components/EditExports";
 import NavigationBar from "./components/NavigationBar";
 import NavigationErrorBoundary from "./components/NavigationErrorBoundary";
 import { DocumentProvider } from "./contexts/DocumentContext";
@@ -27,6 +28,7 @@ root.render(
               <Route path="/" element={<App />} />
               <Route path="/groups" element={<Groups />} />
               <Route path="/edit-groups/:groupId" element={<EditGroups />} />
+              <Route path="/edit-exports/:groupId" element={<EditExports />} />
               <Route path="/configure-groups/:fileId" element={<GroupConfigurationPreview />} />
               <Route path="/group-management/:fileId" element={<GroupManagement />} />
               <Route path="*" element={

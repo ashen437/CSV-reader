@@ -425,6 +425,7 @@ function GroupManagement() {
         },
         body: JSON.stringify({
           name: groupName.trim(),
+          description: `AI-grouped results for ${selectedFile?.filename || 'file'}`,
           structured_results: finalResults.structured_results || finalResults,
           file_id: fileId,
           created_at: new Date().toISOString()
@@ -437,12 +438,21 @@ function GroupManagement() {
         setShowSaveGroupModal(false);
         setGroupName('');
       } else {
-        const error = await response.json();
-        alert(`Error saving group: ${error.detail}`);
+        console.error('Save failed with status:', response.status);
+        try {
+          const errorData = await response.json();
+          console.error('Error details:', errorData);
+          alert(`Error saving group: ${errorData.detail || JSON.stringify(errorData)}`);
+        } catch (parseError) {
+          console.error('Could not parse error response:', parseError);
+          const errorText = await response.text();
+          console.error('Raw error response:', errorText);
+          alert(`Error saving group: ${response.status} - ${errorText}`);
+        }
       }
     } catch (error) {
       console.error('Error saving group:', error);
-      alert('Error saving group');
+      alert(`Error saving group: ${error.message}`);
     } finally {
       setIsSavingFinalResults(false);
     }

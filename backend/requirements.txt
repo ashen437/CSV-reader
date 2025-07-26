@@ -6,10 +6,10 @@ python-multipart==0.0.6
 # Data Processing and Analysis
 pandas==2.2.3
 numpy==1.26.4
+openpyxl==3.1.2
 
 # Database and Storage
 pymongo==4.6.0
-gridfs>=4.6.0
 
 # AI and Machine Learning
 openai==1.57.2
@@ -18,60 +18,13 @@ python-dotenv==1.0.0
 # Chart Generation and Visualization  
 plotly==5.17.0
 matplotlib==3.8.2
-kaleido>=0.2.1
-
-# Cloud Storage and Enhanced Features
-cloudinary==1.36.0
-seaborn>=0.12.0
-chardet>=5.2.0
 
 # Authentication and Security
 pydantic==2.10.5
-email-validator>=2.2.0
-pyjwt>=2.10.1
-passlib>=1.7.4
-python-jose>=3.3.0
-cryptography>=42.0.8
-
-# Optional: Advanced AI Features (uncomment if needed)
-# pandasai>=1.5.0
-# langchain-openai>=0.1.0  
-# ai-data-science-team>=0.1.0
 
 # Development and Testing
 requests==2.31.0
-pytest>=8.0.0
-black>=24.1.1
-isort>=5.13.2
-flake8>=7.0.0
-mypy>=1.8.0
 
 # Additional utilities
-boto3>=1.34.129
-requests-oauthlib>=2.0.0
-typer>=0.9.0
-pyyaml>=6.0
-tzdata>=2024.2
-motor==3.3.1
 chardet==5.2.0
-Pillow==10.1.0
-kaleido==0.2.1
-typing-extensions>=4.8.0
-setuptools>=65.0.0
-# Additional dependencies for CSV processing and analysis
-scikit-learn>=1.3.0
-seaborn>=0.12.0
-xlrd>=2.0.0
-openpyxl>=3.1.0
-# For data processing and utilities
 python-dateutil>=2.8.0
-pytz>=2023.3
-# For enhanced text processing
-python-dateutil>=2.8.0
-pytz>=2023.3
-
-# Advanced AI data science packages
-langchain-openai>=0.1.0
-langchain-community>=0.2.0
-langchain-core>=0.2.0
-git+https://github.com/business-science/ai-data-science-team.git

@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 import pandas as pd
+import numpy as np
 import pymongo
 from pymongo import MongoClient
 import gridfs
@@ -44,6 +45,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler to prevent server crashes
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Handle any unhandled exceptions to prevent server crashes"""
+    print(f"Global exception handler caught: {type(exc).__name__}: {str(exc)}")
+    import traceback
+    print(f"Traceback: {traceback.format_exc()}")
+    
+    # Return a proper error response instead of crashing
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"}
+    )
 
 # Database connection
 MONGO_URL = os.getenv("MONGO_URL")
@@ -538,6 +553,11 @@ class SavedGroupData(BaseModel):
 async def root():
     return {"message": "CSV Processing Dashboard API"}
 
+@app.get("/api/health")
+async def health_check():
+    """Simple health check endpoint for frontend"""
+    return {"status": "healthy", "message": "Backend server is running"}
+
 @app.get("/api/debug/test-grouping")
 async def test_grouping():
     """Test endpoint to debug grouping issues"""
@@ -607,15 +627,122 @@ async def upload_csv(file: UploadFile = File(...)):
         max_preview_rows = min(1000, len(df))
         preview_columns = df.columns.tolist()
         
-        # Store metadata
+        # Analyze column data types with robust detection
+        def detect_column_type(series):
+            """Detect the data type of a pandas Series"""
+            # Remove null values for analysis
+            non_null_series = series.dropna()
+            if len(non_null_series) == 0:
+                return 'text'
+            
+            # Sample a subset for performance on large datasets
+            sample_size = min(1000, len(non_null_series))
+            sample = non_null_series.head(sample_size)
+            
+            # Convert sample to string first to handle mixed types
+            sample_strings = [str(x).strip() for x in sample if pd.notna(x)]
+            
+            # Count how many values match each type
+            integer_count = 0
+            float_count = 0
+            
+            for val_str in sample_strings:
+                if val_str == '':
+                    continue
+                    
+                # Check for integer first
+                try:
+                    # Try to parse as integer directly
+                    int(val_str)
+                    integer_count += 1
+                    continue
+                except ValueError:
+                    pass
+                
+                # Check for float (including integers that can be expressed as floats)
+                try:
+                    float_val = float(val_str)
+                    # Check if it's actually an integer value in float form (like "42.0")
+                    if float_val.is_integer() and ('.' in val_str or 'e' in val_str.lower()):
+                        integer_count += 1
+                    else:
+                        float_count += 1
+                except ValueError:
+                    pass
+            
+            total_values = len(sample_strings)
+            if total_values == 0:
+                return 'text'
+            
+            # If more than 70% are integers, classify as integer
+            if integer_count / total_values > 0.7:
+                return 'integer'
+            
+            # If more than 60% are numeric (int or float), classify as decimal
+            if (integer_count + float_count) / total_values > 0.6:
+                return 'decimal'
+            
+            # Check for dates (only if not numeric)
+            try:
+                pd.to_datetime(sample, errors='raise')
+                return 'date'
+            except (ValueError, TypeError):
+                pass
+            
+            # Check for booleans
+            unique_values = set(val_str.lower() for val_str in sample_strings)
+            boolean_values = {'true', 'false', '1', '0', 'yes', 'no', 'y', 'n'}
+            if unique_values.issubset(boolean_values) and len(unique_values) <= 4:
+                return 'boolean'
+            
+            # Default to text
+            return 'text'
+        
+        # Create column metadata with types
+        columns_metadata = []
+        for col in df.columns:
+            col_type = detect_column_type(df[col])
+            
+            # Get some sample values for reference (first 3 non-null values)
+            sample_values = df[col].dropna().head(3).tolist()
+            
+            # Convert numpy types to Python native types for MongoDB compatibility
+            sample_values_clean = []
+            for val in sample_values:
+                if pd.isna(val):
+                    continue
+                # Convert numpy types to Python native types
+                if hasattr(val, 'item'):  # numpy scalar
+                    sample_values_clean.append(val.item())
+                elif isinstance(val, (np.integer, np.floating)):
+                    sample_values_clean.append(val.item())
+                elif isinstance(val, np.bool_):
+                    sample_values_clean.append(bool(val))
+                else:
+                    sample_values_clean.append(str(val))
+            
+            # Get null count and total count as Python int (not numpy.int64)
+            null_count = int(df[col].isnull().sum())
+            total_count = int(len(df[col]))
+            
+            columns_metadata.append({
+                'name': str(col),  # Ensure column name is string
+                'type': col_type,
+                'sample_values': sample_values_clean,
+                'null_count': null_count,
+                'total_count': total_count
+            })
+        
+        # Store metadata with enhanced column information
         metadata = {
             "file_id": file_id,
             "filename": file.filename,
             "upload_date": datetime.now(),
             "file_size": len(content),
             "status": "uploaded",
-            "total_rows": len(df),
-            "columns": preview_columns
+            "total_rows": int(len(df)),  # Convert to Python int
+            "columns": preview_columns,  # Keep for backward compatibility
+            "columns_metadata": columns_metadata  # New detailed column information
         }
         
         files_collection.insert_one(metadata)
@@ -624,8 +751,9 @@ async def upload_csv(file: UploadFile = File(...)):
             "file_id": file_id,
             "filename": file.filename,
             "status": "uploaded",
-            "total_rows": len(df),
-            "columns": preview_columns
+            "total_rows": int(len(df)),  # Convert to Python int
+            "columns": preview_columns,
+            "columns_metadata": columns_metadata
         }
         
     except Exception as e:
@@ -2234,6 +2362,16 @@ async def delete_final_results(file_id: str):
 async def save_group_with_name(data: SavedGroupData):
     """Save a group with user-provided name and description"""
     try:
+        print(f"Received save request for group: {data.name}")
+        print(f"File ID: {data.file_id}")
+        print(f"Structured results keys: {list(data.structured_results.keys()) if data.structured_results else 'None'}")
+        
+        # Get the original file metadata to include column information
+        file_metadata = None
+        if data.file_id:
+            file_metadata = files_collection.find_one({"file_id": data.file_id})
+            print(f"Found file metadata: {bool(file_metadata)}")
+        
         # Create the saved group document
         saved_group_doc = {
             "name": data.name,
@@ -2244,8 +2382,23 @@ async def save_group_with_name(data: SavedGroupData):
             "saved_at": datetime.now().isoformat()
         }
         
+        # Add column metadata if available
+        if file_metadata:
+            saved_group_doc["file_name"] = file_metadata.get("filename", "Unknown")
+            saved_group_doc["total_rows"] = file_metadata.get("total_rows", 0)
+            saved_group_doc["columns_metadata"] = file_metadata.get("columns_metadata", [])
+            # Keep original columns list for backward compatibility
+            saved_group_doc["available_columns"] = file_metadata.get("columns", [])
+            print(f"Added {len(saved_group_doc.get('columns_metadata', []))} column metadata entries")
+        else:
+            print("No file metadata found - saved group will not have column information")
+        
+        print(f"About to save document with keys: {list(saved_group_doc.keys())}")
+        
         # Save to database
         result = saved_groups_collection.insert_one(saved_group_doc)
+        
+        print(f"Successfully saved with ID: {result.inserted_id}")
         
         return {
             "status": "success",
@@ -2254,6 +2407,8 @@ async def save_group_with_name(data: SavedGroupData):
         }
         
     except Exception as e:
+        print(f"Error saving group: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
         raise HTTPException(status_code=500, detail=f"Error saving group: {str(e)}")
 
 @app.get("/api/saved-groups")
@@ -2353,6 +2508,126 @@ async def delete_saved_group(group_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting saved group: {str(e)}")
+
+@app.get("/api/saved-groups/{group_id}/columns")
+async def get_saved_group_columns(group_id: str):
+    """Get column metadata for a specific saved group"""
+    try:
+        from bson import ObjectId
+        
+        # Validate ObjectId format
+        if not ObjectId.is_valid(group_id):
+            raise HTTPException(status_code=400, detail="Invalid group ID format")
+        
+        saved_group = saved_groups_collection.find_one({"_id": ObjectId(group_id)})
+        
+        if not saved_group:
+            raise HTTPException(status_code=404, detail="Saved group not found")
+        
+        # Get column metadata - should be stored with the saved group
+        columns_metadata = saved_group.get('columns_metadata', [])
+        available_columns = saved_group.get('available_columns', [])
+        file_name = saved_group.get('file_name', 'Unknown')
+        total_rows = saved_group.get('total_rows', 0)
+        
+        # If no metadata in saved group, try to get from original file
+        if not columns_metadata and saved_group.get('file_id'):
+            file_metadata = files_collection.find_one({"file_id": saved_group['file_id']})
+            if file_metadata:
+                columns_metadata = file_metadata.get('columns_metadata', [])
+                available_columns = file_metadata.get('columns', [])
+                file_name = file_metadata.get('filename', 'Unknown')
+                total_rows = file_metadata.get('total_rows', 0)
+        
+        return {
+            "status": "success",
+            "group_id": group_id,
+            "group_name": saved_group.get('name', 'Unknown Group'),
+            "file_name": file_name,
+            "total_rows": total_rows,
+            "columns_metadata": columns_metadata,
+            "available_columns": available_columns  # For backward compatibility
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving column metadata: {str(e)}")
+
+@app.post("/api/saved-groups/{group_id}/migrate-metadata")
+async def migrate_group_metadata(group_id: str):
+    """Migrate a specific saved group to include column metadata from its original file"""
+    try:
+        from bson import ObjectId
+        
+        # Validate ObjectId format
+        if not ObjectId.is_valid(group_id):
+            raise HTTPException(status_code=400, detail="Invalid group ID format")
+        
+        saved_group = saved_groups_collection.find_one({"_id": ObjectId(group_id)})
+        
+        if not saved_group:
+            raise HTTPException(status_code=404, detail="Saved group not found")
+        
+        # Check if already has metadata
+        if saved_group.get('columns_metadata'):
+            return {
+                "status": "success",
+                "message": "Group already has column metadata",
+                "columns_count": len(saved_group.get('columns_metadata', []))
+            }
+        
+        # Get the original file metadata
+        file_id = saved_group.get('file_id')
+        if not file_id:
+            raise HTTPException(status_code=400, detail="No file ID found for this group")
+        
+        file_metadata = files_collection.find_one({"file_id": file_id})
+        if not file_metadata:
+            raise HTTPException(status_code=404, detail="Original file metadata not found")
+        
+        # Prepare update data
+        update_data = {}
+        
+        # Add column metadata if available
+        if file_metadata.get('columns_metadata'):
+            update_data['columns_metadata'] = file_metadata['columns_metadata']
+        
+        # Add other useful file information
+        if file_metadata.get('filename'):
+            update_data['file_name'] = file_metadata['filename']
+        
+        if file_metadata.get('total_rows'):
+            update_data['total_rows'] = file_metadata['total_rows']
+        
+        if file_metadata.get('columns'):
+            update_data['available_columns'] = file_metadata['columns']
+        
+        # Add migration timestamp
+        update_data['metadata_migrated_at'] = datetime.now().isoformat()
+        
+        if update_data:
+            # Update the saved group
+            result = saved_groups_collection.update_one(
+                {"_id": ObjectId(group_id)},
+                {"$set": update_data}
+            )
+            
+            if result.modified_count > 0:
+                return {
+                    "status": "success",
+                    "message": "Column metadata added successfully",
+                    "columns_count": len(update_data.get('columns_metadata', []))
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Failed to update group metadata")
+        else:
+            raise HTTPException(status_code=404, detail="No metadata available to migrate")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error migrating metadata: {str(e)}")
 
 @app.get("/api/saved-groups/{group_id}/export-excel")
 async def export_saved_group_to_excel(group_id: str):
@@ -2464,6 +2739,557 @@ async def export_saved_group_to_excel(group_id: str):
         print(f"Error exporting to Excel: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error exporting to Excel: {str(e)}")
+
+@app.get("/api/files/{file_id}/data")
+async def get_file_data(file_id: str):
+    """Get the original CSV data for a file"""
+    try:
+        print(f"Getting file data for file_id: {file_id}")
+        
+        # Get the file from GridFS - files are stored with UUID strings as _id
+        fs = gridfs.GridFS(db)
+        file_data = None
+        
+        try:
+            # Try direct UUID string lookup first
+            print(f"Trying direct UUID lookup for: {file_id}")
+            file_data = fs.get(file_id)
+            print(f"Found file with UUID: {file_data.filename}")
+        except gridfs.NoFile:
+            # If not found with UUID, try ObjectId format (for backward compatibility)
+            try:
+                from bson import ObjectId
+                print(f"UUID lookup failed, trying ObjectId for: {file_id}")
+                if ObjectId.is_valid(file_id):
+                    file_data = fs.get(ObjectId(file_id))
+                    print(f"Found file with ObjectId: {file_data.filename}")
+                else:
+                    print(f"Invalid ObjectId format: {file_id}")
+                    raise HTTPException(status_code=404, detail="File not found - invalid ID format")
+            except gridfs.NoFile:
+                print(f"File not found with either UUID or ObjectId: {file_id}")
+                raise HTTPException(status_code=404, detail="File not found")
+        except Exception as gridfs_error:
+            print(f"GridFS error: {gridfs_error}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(gridfs_error)}")
+        
+        if not file_data:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Read the file content as bytes with proper error handling
+        try:
+            raw_bytes = file_data.read()
+            print(f"Read {len(raw_bytes)} bytes from file")
+            
+            if not raw_bytes:
+                raise HTTPException(status_code=500, detail="File is empty or could not be read")
+                
+        except Exception as read_error:
+            print(f"Error reading file data: {read_error}")
+            raise HTTPException(status_code=500, detail=f"Error reading file: {str(read_error)}")
+        
+        # Try different encodings on the bytes with comprehensive error handling
+        csv_content = None
+        encodings_to_try = ['utf-8', 'windows-1252', 'iso-8859-1', 'cp1252', 'latin1', 'ascii']
+        encoding_used = None
+        
+        for encoding in encodings_to_try:
+            try:
+                csv_content = raw_bytes.decode(encoding)
+                encoding_used = encoding
+                print(f"Successfully decoded with {encoding}, length: {len(csv_content)} characters")
+                break
+            except UnicodeDecodeError as decode_error:
+                print(f"{encoding} decoding failed: {decode_error}")
+                continue
+            except Exception as unexpected_error:
+                print(f"Unexpected error with {encoding}: {unexpected_error}")
+                continue
+        
+        # If all encodings fail, use UTF-8 with error replacement as last resort
+        if csv_content is None:
+            try:
+                csv_content = raw_bytes.decode('utf-8', errors='replace')
+                encoding_used = 'utf-8-replace'
+                print(f"Decoded with UTF-8 and error replacement, length: {len(csv_content)} characters")
+            except Exception as final_error:
+                print(f"Even UTF-8 with error replacement failed: {final_error}")
+                raise HTTPException(status_code=500, detail="File encoding is not supported")
+        
+        if not csv_content or len(csv_content.strip()) == 0:
+            raise HTTPException(status_code=500, detail="File appears to be empty after decoding")
+        
+        # Parse CSV with comprehensive error handling
+        from io import StringIO
+        
+        try:
+            csv_buffer = StringIO(csv_content)
+            df = pd.read_csv(csv_buffer)
+            print(f"Parsed CSV successfully: {len(df)} rows, {len(df.columns)} columns")
+            print(f"Columns: {list(df.columns)}")
+            
+        except pd.errors.EmptyDataError:
+            print("CSV file is empty")
+            raise HTTPException(status_code=500, detail="CSV file is empty")
+            
+        except pd.errors.ParserError as parser_error:
+            print(f"CSV parsing error: {parser_error}")
+            # Try with different parameters
+            try:
+                csv_buffer = StringIO(csv_content)
+                df = pd.read_csv(csv_buffer, sep=None, engine='python')  # Auto-detect separator
+                print(f"Parsed CSV with auto-detection: {len(df)} rows, {len(df.columns)} columns")
+            except Exception as fallback_error:
+                print(f"CSV parsing with auto-detection also failed: {fallback_error}")
+                raise HTTPException(status_code=500, detail=f"Cannot parse CSV file: {str(fallback_error)}")
+                
+        except Exception as csv_error:
+            print(f"Unexpected CSV parsing error: {csv_error}")
+            # Try with most permissive parameters
+            try:
+                csv_buffer = StringIO(csv_content)
+                df = pd.read_csv(csv_buffer, 
+                               on_bad_lines='skip',  # Skip bad lines
+                               encoding_errors='replace',  # Replace encoding errors
+                               sep=None,  # Auto-detect separator
+                               engine='python')
+                print(f"Parsed CSV with permissive settings: {len(df)} rows, {len(df.columns)} columns")
+            except Exception as final_csv_error:
+                print(f"All CSV parsing attempts failed: {final_csv_error}")
+                raise HTTPException(status_code=500, detail=f"Cannot parse CSV file: {str(final_csv_error)}")
+        
+        # Validate the parsed data
+        if df.empty:
+            raise HTTPException(status_code=500, detail="CSV file contains no data")
+            
+        if len(df.columns) == 0:
+            raise HTTPException(status_code=500, detail="CSV file contains no columns")
+        
+        # Convert to list of dictionaries with error handling
+        try:
+            # Handle NaN and infinite values before converting to dict - replace with None for JSON serialization
+            df_clean = df.copy()
+            
+            # Replace NaN values with None (which becomes null in JSON)
+            df_clean = df_clean.where(pd.notnull(df_clean), None)
+            
+            # Replace infinite values with None (inf and -inf are not JSON compliant)
+            import numpy as np
+            numeric_columns = df_clean.select_dtypes(include=[np.number]).columns
+            for col in numeric_columns:
+                df_clean[col] = df_clean[col].replace([np.inf, -np.inf], None)
+            
+            data = df_clean.to_dict('records')
+            print(f"Converted DataFrame to dict with {len(data)} records, NaN and infinite values replaced with None")
+        except Exception as dict_error:
+            print(f"Error converting DataFrame to dict: {dict_error}")
+            raise HTTPException(status_code=500, detail=f"Error processing CSV data: {str(dict_error)}")
+        
+        result = {
+            "file_id": file_id,
+            "filename": file_data.filename,
+            "data": data,
+            "columns": list(df.columns),
+            "row_count": len(data),
+            "encoding_used": encoding_used
+        }
+        
+        print(f"Successfully returning result with {len(result['data'])} rows and {len(result['columns'])} columns")
+        print(f"Encoding used: {encoding_used}")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        print(f"Unexpected error in get_file_data: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# Custom Export Data Model
+class CustomExportColumn(BaseModel):
+    column_name: str
+    aggregation_type: str  # 'majority' or 'sum'
+
+class CustomExportRequest(BaseModel):
+    group_id: str
+    custom_columns: List[CustomExportColumn]
+
+@app.post("/api/export-custom-excel")
+async def export_custom_excel(request: CustomExportRequest):
+    """Export a saved group to Excel with custom columns and aggregations"""
+    try:
+        from bson import ObjectId
+        from collections import Counter
+        import numpy as np
+        
+        # Validate ObjectId format for group_id
+        if not ObjectId.is_valid(request.group_id):
+            raise HTTPException(status_code=400, detail="Invalid group ID format")
+        
+        # Get the saved group
+        saved_group = saved_groups_collection.find_one({"_id": ObjectId(request.group_id)})
+        if not saved_group:
+            raise HTTPException(status_code=404, detail="Saved group not found")
+        
+        # Get the original file data
+        file_id = saved_group.get('file_id')
+        if not file_id:
+            raise HTTPException(status_code=400, detail="No original file associated with this group")
+        
+        # Get original CSV data with robust error handling
+        fs = gridfs.GridFS(db)
+        file_data = None
+        
+        try:
+            # Try direct UUID string lookup first (most common case)
+            file_data = fs.get(file_id)
+            print(f"Found export file with UUID: {file_data.filename}")
+        except gridfs.NoFile:
+            # If not found with UUID, try ObjectId format (for backward compatibility)
+            try:
+                if ObjectId.is_valid(file_id):
+                    file_data = fs.get(ObjectId(file_id))
+                    print(f"Found export file with ObjectId: {file_data.filename}")
+                else:
+                    raise HTTPException(status_code=404, detail="Original file not found - invalid file ID format")
+            except gridfs.NoFile:
+                raise HTTPException(status_code=404, detail="Original file not found")
+        except Exception as gridfs_error:
+            print(f"GridFS error during export: {gridfs_error}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(gridfs_error)}")
+        
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Original file not found")
+        
+        # Read the file content as bytes with proper error handling
+        try:
+            raw_bytes = file_data.read()
+            print(f"Read {len(raw_bytes)} bytes from original file for export")
+            
+            if not raw_bytes:
+                raise HTTPException(status_code=500, detail="Original file is empty or could not be read")
+                
+        except Exception as read_error:
+            print(f"Error reading export file data: {read_error}")
+            raise HTTPException(status_code=500, detail=f"Error reading original file: {str(read_error)}")
+        
+        # Try different encodings on the bytes with comprehensive error handling
+        csv_content = None
+        encodings_to_try = ['utf-8', 'windows-1252', 'iso-8859-1', 'cp1252', 'latin1', 'ascii']
+        
+        for encoding in encodings_to_try:
+            try:
+                csv_content = raw_bytes.decode(encoding)
+                print(f"Successfully decoded export file with {encoding}")
+                break
+            except UnicodeDecodeError as decode_error:
+                print(f"Export file {encoding} decoding failed: {decode_error}")
+                continue
+            except Exception as unexpected_error:
+                print(f"Unexpected error with {encoding} during export: {unexpected_error}")
+                continue
+        
+        # If all encodings fail, use UTF-8 with error replacement as last resort
+        if csv_content is None:
+            try:
+                csv_content = raw_bytes.decode('utf-8', errors='replace')
+                print(f"Decoded export file with UTF-8 and error replacement")
+            except Exception as final_error:
+                print(f"Even UTF-8 with error replacement failed during export: {final_error}")
+                raise HTTPException(status_code=500, detail="Original file encoding is not supported")
+        
+        if not csv_content or len(csv_content.strip()) == 0:
+            raise HTTPException(status_code=500, detail="Original file appears to be empty after decoding")
+        
+        # Parse CSV with comprehensive error handling
+        from io import StringIO
+        
+        try:
+            csv_buffer = StringIO(csv_content)
+            original_df = pd.read_csv(csv_buffer)
+            print(f"Parsed export CSV successfully: {len(original_df)} rows, {len(original_df.columns)} columns")
+            
+        except pd.errors.EmptyDataError:
+            print("Export CSV file is empty")
+            raise HTTPException(status_code=500, detail="Original CSV file is empty")
+            
+        except pd.errors.ParserError as parser_error:
+            print(f"Export CSV parsing error: {parser_error}")
+            # Try with different parameters
+            try:
+                csv_buffer = StringIO(csv_content)
+                original_df = pd.read_csv(csv_buffer, sep=None, engine='python')  # Auto-detect separator
+                print(f"Parsed export CSV with auto-detection: {len(original_df)} rows, {len(original_df.columns)} columns")
+            except Exception as fallback_error:
+                print(f"Export CSV parsing with auto-detection also failed: {fallback_error}")
+                raise HTTPException(status_code=500, detail=f"Cannot parse original CSV file: {str(fallback_error)}")
+                
+        except Exception as csv_error:
+            print(f"Unexpected export CSV parsing error: {csv_error}")
+            # Try with most permissive parameters
+            try:
+                csv_buffer = StringIO(csv_content)
+                original_df = pd.read_csv(csv_buffer, 
+                                        on_bad_lines='skip',  # Skip bad lines
+                                        encoding_errors='replace',  # Replace encoding errors
+                                        sep=None,  # Auto-detect separator
+                                        engine='python')
+                print(f"Parsed export CSV with permissive settings: {len(original_df)} rows, {len(original_df.columns)} columns")
+            except Exception as final_csv_error:
+                print(f"All export CSV parsing attempts failed: {final_csv_error}")
+                raise HTTPException(status_code=500, detail=f"Cannot parse original CSV file: {str(final_csv_error)}")
+        
+        # Validate the parsed data
+        if original_df.empty:
+            raise HTTPException(status_code=500, detail="Original CSV file contains no data")
+            
+        if len(original_df.columns) == 0:
+            raise HTTPException(status_code=500, detail="Original CSV file contains no columns")
+        
+        # Create aggregation mapping - this is a simplified approach
+        # In a full implementation, you'd need to track which original rows map to each item
+        def aggregate_column_values(values, aggregation_type, column_name):
+            """Aggregate column values based on type"""
+            if not values:
+                return None
+            
+            # Remove null/empty values
+            clean_values = [v for v in values if pd.notna(v) and str(v).strip() != '']
+            if not clean_values:
+                return None
+            
+            if aggregation_type == 'majority':
+                # Return the most common value
+                if clean_values:
+                    counter = Counter(clean_values)
+                    return counter.most_common(1)[0][0]
+                return None
+            elif aggregation_type == 'sum':
+                # Sum numeric values only
+                numeric_values = []
+                for v in clean_values:
+                    try:
+                        numeric_values.append(float(v))
+                    except (ValueError, TypeError):
+                        continue
+                return sum(numeric_values) if numeric_values else 0
+            
+            return None
+        
+        # Build export data
+        export_data = []
+        structured_results = saved_group.get('structured_results', {})
+        
+        print(f"Processing structured results for export...")
+        print(f"Structured results keys: {list(structured_results.keys()) if structured_results else 'None'}")
+        
+        # Handle different data structures
+        main_groups = []
+        if 'main_groups' in structured_results:
+            main_groups_raw = structured_results['main_groups']
+            if isinstance(main_groups_raw, dict):
+                main_groups = list(main_groups_raw.values())
+            elif isinstance(main_groups_raw, list):
+                main_groups = main_groups_raw
+            else:
+                print(f"Unexpected main_groups type: {type(main_groups_raw)}")
+        elif 'groups' in structured_results:
+            # Handle newer format
+            main_groups = structured_results['groups']
+            
+        print(f"Found {len(main_groups)} main groups for export")
+        
+        for i, main_group in enumerate(main_groups):
+            if not isinstance(main_group, dict):
+                print(f"Skipping non-dict main group at index {i}: {type(main_group)}")
+                continue
+                
+            main_group_name = main_group.get('name', f'Main Group {i+1}')
+            print(f"Processing main group: {main_group_name}")
+            
+            # Handle sub_groups with different structures
+            sub_groups = []
+            if 'sub_groups' in main_group:
+                sub_groups_raw = main_group['sub_groups']
+                if isinstance(sub_groups_raw, dict):
+                    sub_groups = list(sub_groups_raw.values())
+                elif isinstance(sub_groups_raw, list):
+                    sub_groups = sub_groups_raw
+            
+            print(f"Found {len(sub_groups)} sub groups in {main_group_name}")
+            
+            if not sub_groups:
+                # If no sub_groups, create a default one
+                sub_groups = [{'name': main_group_name, 'items': main_group.get('items', [])}]
+        
+        for main_group in main_groups:
+            if not isinstance(main_group, dict):
+                continue
+                
+            main_group_name = main_group.get('name', 'Unknown Main Group')
+            sub_groups = main_group.get('sub_groups', [])
+            
+            if isinstance(sub_groups, dict):
+                sub_groups = list(sub_groups.values())
+            elif not isinstance(sub_groups, list):
+                sub_groups = []
+            
+            for j, sub_group in enumerate(sub_groups):
+                if not isinstance(sub_group, dict):
+                    print(f"Skipping non-dict sub group at index {j} in {main_group_name}")
+                    continue
+                    
+                sub_group_name = sub_group.get('name', f'Sub Group {j+1}')
+                items = sub_group.get('items', [])
+                
+                if not isinstance(items, list):
+                    print(f"Items is not a list in {sub_group_name}, converting from {type(items)}")
+                    items = []
+                
+                print(f"Processing {len(items)} items in sub group: {sub_group_name}")
+                
+                for k, item in enumerate(items):
+                    if not isinstance(item, dict):
+                        print(f"Skipping non-dict item at index {k} in {sub_group_name}")
+                        continue
+                    
+                    item_name = item.get('name', f'Item {k+1}')
+                    item_count = item.get('count', 1)
+                    
+                    # Base row data
+                    row = {
+                        'Main Group': main_group_name,
+                        'Sub Group': sub_group_name,
+                        'Item Name': item_name,
+                        'Record Count': item_count
+                    }
+                    
+                    print(f"Processing item: {item_name} (count: {item_count})")
+                    
+                    # Add custom columns with aggregated values
+                    for custom_col in request.custom_columns:
+                        column_name = custom_col.column_name
+                        aggregation_type = custom_col.aggregation_type
+                        
+                        print(f"Processing custom column: {column_name} ({aggregation_type})")
+                        
+                        if column_name in original_df.columns:
+                            # Enhanced matching: try multiple strategies to find related records
+                            matching_rows = pd.DataFrame()
+                            
+                            # Strategy 1: Exact name match (case-insensitive)
+                            if 'name' in original_df.columns:
+                                exact_matches = original_df[original_df['name'].str.lower() == item_name.lower()]
+                                if not exact_matches.empty:
+                                    matching_rows = exact_matches
+                                    print(f"Found {len(matching_rows)} exact matches for {item_name}")
+                            
+                            # Strategy 2: Partial name match in any column
+                            if matching_rows.empty:
+                                matching_rows = original_df[original_df.apply(
+                                    lambda row: any(
+                                        str(item_name).lower() in str(cell).lower() 
+                                        for cell in row.values 
+                                        if pd.notna(cell) and str(cell).strip() != ''
+                                    ), axis=1
+                                )]
+                                if not matching_rows.empty:
+                                    print(f"Found {len(matching_rows)} partial matches for {item_name}")
+                            
+                            # Strategy 3: If still no matches, try keyword matching
+                            if matching_rows.empty:
+                                item_words = set(item_name.lower().split())
+                                matching_rows = original_df[original_df.apply(
+                                    lambda row: any(
+                                        len(item_words.intersection(set(str(cell).lower().split()))) >= min(2, len(item_words))
+                                        for cell in row.values 
+                                        if pd.notna(cell) and str(cell).strip() != ''
+                                    ), axis=1
+                                )]
+                                if not matching_rows.empty:
+                                    print(f"Found {len(matching_rows)} keyword matches for {item_name}")
+                            
+                            # Apply aggregation
+                            if not matching_rows.empty:
+                                values = matching_rows[column_name].tolist()
+                                aggregated_value = aggregate_column_values(values, aggregation_type, column_name)
+                                row[f"{column_name} ({aggregation_type})"] = aggregated_value
+                                print(f"Aggregated value for {column_name}: {aggregated_value}")
+                            else:
+                                # If no matches found, use a sample of data for demonstration
+                                # In production, this should be handled based on business logic
+                                sample_values = original_df[column_name].dropna().head(item_count).tolist()
+                                if sample_values:
+                                    aggregated_value = aggregate_column_values(sample_values, aggregation_type, column_name)
+                                    row[f"{column_name} ({aggregation_type})"] = f"Sample: {aggregated_value}"
+                                    print(f"Using sample value for {column_name}: {aggregated_value}")
+                                else:
+                                    row[f"{column_name} ({aggregation_type})"] = "No data"
+                                    print(f"No data available for {column_name}")
+                        else:
+                            row[f"{column_name} ({aggregation_type})"] = "Column not found"
+                            print(f"Column {column_name} not found in original data")
+                    
+                    export_data.append(row)
+        
+        print(f"Generated {len(export_data)} rows for export")
+        
+        print(f"Generated {len(export_data)} rows for export")
+        
+        # Create Excel workbook
+        output = BytesIO()
+        
+        try:
+            if export_data:
+                export_df = pd.DataFrame(export_data)
+                print(f"Created DataFrame with shape: {export_df.shape}")
+                print(f"DataFrame columns: {list(export_df.columns)}")
+            else:
+                # Create empty sheet if no data
+                print("No export data generated, creating empty template")
+                base_columns = ['Main Group', 'Sub Group', 'Item Name', 'Record Count']
+                custom_columns = [f"{col.column_name} ({col.aggregation_type})" for col in request.custom_columns]
+                all_columns = base_columns + custom_columns
+                
+                export_df = pd.DataFrame({col: ['No data available'] for col in all_columns})
+                print(f"Created empty DataFrame with columns: {all_columns}")
+            
+            # Create Excel file with error handling
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                export_df.to_excel(writer, sheet_name='Custom Export', index=False)
+                print("Successfully wrote Excel file to buffer")
+            
+            output.seek(0)
+            print(f"Excel file size: {len(output.getvalue())} bytes")
+            
+        except Exception as excel_error:
+            print(f"Error creating Excel file: {excel_error}")
+            raise HTTPException(status_code=500, detail=f"Error creating Excel file: {str(excel_error)}")
+        
+        # Create filename
+        safe_name = saved_group.get('name', 'group')
+        safe_name = ''.join(c for c in safe_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_name = safe_name.replace(' ', '_')
+        if not safe_name:
+            safe_name = 'export'
+        filename = f"{safe_name}_custom_export.xlsx"
+        
+        return StreamingResponse(
+            BytesIO(output.getvalue()),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Error in custom export: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error in custom export: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -36,6 +36,9 @@ function EditGroups() {
         const data = await response.json();
         const group = data.saved_groups?.find(g => g._id === groupId);
         if (group) {
+          console.log('Original group data:', group);
+          console.log('Group file_id:', group.file_id);
+          console.log('Group file_name:', group.file_name);
           setOriginalGroup(group);
           // Create a deep copy for editing
           setEditedGroup(JSON.parse(JSON.stringify(group)));
@@ -167,13 +170,24 @@ function EditGroups() {
 
     setIsSaving(true);
     try {
+      // Ensure we have a valid file_id
+      let fileId = editedGroup.file_id || originalGroup.file_id || editedGroup.file_name || originalGroup.file_name;
+      if (!fileId) {
+        fileId = 'unknown';
+        console.warn('No file_id found, using "unknown"');
+      }
+
       const saveData = {
         name: newGroupName.trim(),
         description: `Edited version of ${originalGroup.name}`,
         structured_results: editedGroup.structured_results,
-        file_id: editedGroup.file_id || editedGroup.file_name || 'unknown',
+        file_id: fileId,
         created_at: new Date().toISOString()
       };
+
+      console.log('Saving group with data:', saveData);
+      console.log('File ID being sent:', saveData.file_id);
+      console.log('Structured results keys:', Object.keys(saveData.structured_results || {}));
 
       const response = await fetch(`${API_BASE_URL}/api/saved-groups`, {
         method: 'POST',
@@ -187,12 +201,21 @@ function EditGroups() {
         alert('Group saved successfully!');
         navigate('/groups');
       } else {
-        const errorData = await response.json();
-        alert(`Error saving group: ${errorData.detail}`);
+        console.error('Save failed with status:', response.status);
+        try {
+          const errorData = await response.json();
+          console.error('Error details:', errorData);
+          alert(`Error saving group: ${errorData.detail || JSON.stringify(errorData)}`);
+        } catch (parseError) {
+          console.error('Could not parse error response:', parseError);
+          const errorText = await response.text();
+          console.error('Raw error response:', errorText);
+          alert(`Error saving group: ${response.status} - ${errorText}`);
+        }
       }
     } catch (error) {
       console.error('Error saving group:', error);
-      alert('Error saving group');
+      alert(`Error saving group: ${error.message}`);
     } finally {
       setIsSaving(false);
     }
