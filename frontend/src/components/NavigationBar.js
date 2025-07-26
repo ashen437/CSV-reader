@@ -78,16 +78,6 @@ const NavigationBar = () => {
               Home
             </Link>
             <Link
-              to="/charts"
-              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                isActive('/charts')
-                  ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600'
-                  : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
-              }`}
-            >
-              Chat & Charts
-            </Link>
-            <Link
               to="/groups"
               className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive('/groups')
@@ -170,20 +160,6 @@ const NavigationBar = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5a2 2 0 012-2h4a2 2 0 012 2v6H8V5z" />
               </svg>
               Home
-            </Link>
-            <Link
-              to="/charts"
-              onClick={() => setIsMobileMenuOpen(false)}
-              className={`flex items-center px-4 py-3 rounded-lg text-base font-medium transition-colors touch-manipulation ${
-                isActive('/charts')
-                  ? 'text-blue-600 bg-blue-50 border-l-4 border-blue-600'
-                  : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50 active:bg-gray-100'
-              }`}
-            >
-              <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-              Chat & Charts
             </Link>
             <Link
               to="/groups"

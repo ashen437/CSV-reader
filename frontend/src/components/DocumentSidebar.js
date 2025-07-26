@@ -282,13 +282,6 @@ const DocumentSidebar = ({ isMobileOpen = false, onMobileClose = () => {} }) => 
                           {formatRelativeDate(document.upload_date)}
                         </p>
                       </div>
-                      
-                      {/* Chart indicator */}
-                      {document.has_charts && (
-                        <div className="ml-2 flex-shrink-0">
-                          <div className="w-2 h-2 bg-green-500 rounded-full" title="Has charts"></div>
-                        </div>
-                      )}
                     </div>
 
                     {/* Document details */}
@@ -305,13 +298,6 @@ const DocumentSidebar = ({ isMobileOpen = false, onMobileClose = () => {} }) => 
                         {document.status}
                       </span>
                     </div>
-
-                    {/* Last activity indicator */}
-                    {document.last_chat_activity && (
-                      <div className="mt-2 text-xs text-gray-500">
-                        Last chat: {formatRelativeDate(document.last_chat_activity)}
-                      </div>
-                    )}
                   </div>
                 );
               })}
