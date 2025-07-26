@@ -12,8 +12,8 @@ function Groups() {
   const [isDeleting, setIsDeleting] = useState(false);
   
   // Collapsible bars state
-  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isSummaryCollapsed, setIsSummaryCollapsed] = useState(false);
+  const [collapsedMainGroups, setCollapsedMainGroups] = useState({});
   
   // Export dropdown state
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
@@ -57,6 +57,15 @@ function Groups() {
 
   const handleGroupSelect = (group) => {
     setSelectedGroup(group);
+    // Reset collapsed state when selecting a new group
+    setCollapsedMainGroups({});
+  };
+
+  const toggleMainGroup = (mainIndex) => {
+    setCollapsedMainGroups(prev => ({
+      ...prev,
+      [mainIndex]: !prev[mainIndex]
+    }));
   };
 
   const handleDeleteGroup = async (groupId, groupName) => {
@@ -109,17 +118,15 @@ function Groups() {
   const copyToClipboard = (group) => {
     const structuredResults = group.structured_results;
     let text = `${group.name.toUpperCase()}\n`;
-    text += `Description: ${group.description || 'No description'}\n`;
     text += `Created: ${formatDate(group.created_at)}\n\n`;
     text += `SUMMARY:\n`;
     text += `- Total Items: ${structuredResults.total_items}\n`;
     text += `- Main Groups: ${structuredResults.total_groups}\n`;
-    text += `- Sub Groups: ${structuredResults.total_sub_groups}\n`;
-    text += `- Estimated Savings: ${structuredResults.estimated_total_savings}\n\n`;
+    text += `- Sub Groups: ${structuredResults.total_sub_groups}\n\n`;
     
     structuredResults.main_groups?.forEach((mainGroup) => {
       text += `Main Group: ${mainGroup.name}\n`;
-      text += `  (${mainGroup.total_items} items • ${mainGroup.estimated_savings} savings)\n\n`;
+      text += `  (${mainGroup.total_items} items)\n\n`;
       
       mainGroup.sub_groups?.forEach((subGroup) => {
         text += `  Sub Group: ${subGroup.name}\n`;
@@ -224,26 +231,8 @@ function Groups() {
 
   return (
     <div className="min-h-screen bg-gray-50 pt-16">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Saved Groups</h1>
-              <p className="text-gray-600">Manage your saved procurement group lists</p>
-            </div>
-            <button
-              onClick={() => navigate('/')}
-              className="btn-secondary"
-            >
-              Back to Dashboard
-            </button>
-          </div>
-        </div>
-      </header>
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex gap-6 h-[calc(100vh-200px)]">
+        <div className="flex gap-6 h-[calc(100vh-120px)]">
           {/* Left Sidebar - Saved Groups List */}
           <div className="w-1/3 bg-white rounded-lg shadow-sm border overflow-hidden">
             <div className="p-4 border-b bg-gray-50">
@@ -286,9 +275,6 @@ function Groups() {
                           <h4 className="font-medium text-gray-900 truncate">
                             {group.name}
                           </h4>
-                          <p className="text-sm text-gray-600 mt-1 line-clamp-2">
-                            {group.description || 'No description'}
-                          </p>
                           <div className="flex items-center mt-2 text-xs text-gray-500">
                             <span>{formatDate(group.created_at)}</span>
                             <span className="mx-2">•</span>
@@ -322,113 +308,85 @@ function Groups() {
           <div className="flex-1 bg-white rounded-lg shadow-sm border overflow-hidden">
             {selectedGroup ? (
               <div className="h-full flex flex-col">
-                {/* Collapsible Group Header */}
-                <div className="border-b bg-gray-50">
-                  {/* Header Toggle Bar */}
-                  <div 
-                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100 transition-colors"
-                    onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
-                  >
-                    <h3 className="font-medium text-gray-900">Group Information</h3>
-                    <svg 
-                      className={`w-5 h-5 text-gray-500 transition-transform ${isHeaderCollapsed ? 'rotate-180' : ''}`}
-                      fill="none" 
-                      stroke="currentColor" 
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                  
-                  {/* Collapsible Header Content */}
-                  {!isHeaderCollapsed && (
-                    <div className="px-6 pb-6">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h2 className="text-xl font-bold text-gray-900">{selectedGroup.name}</h2>
-                          <p className="text-gray-600 mt-1">{selectedGroup.description || 'No description'}</p>
-                          <p className="text-sm text-gray-500 mt-2">
-                            Created: {formatDate(selectedGroup.created_at)} | 
-                            File: {selectedGroup.file_name || selectedGroup.file_id}
-                          </p>
-                        </div>
-                        
-                        {/* Export Dropdown */}
-                        <div className="relative ml-4 export-dropdown-container">
-                          <button
-                            onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-                            className="btn-primary flex items-center"
-                          >
-                            Export
-                            <svg 
-                              className={`ml-2 w-4 h-4 transition-transform ${isExportDropdownOpen ? 'rotate-180' : ''}`}
-                              fill="none" 
-                              stroke="currentColor" 
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          
-                          {/* Dropdown Menu */}
-                          {isExportDropdownOpen && (
-                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border z-10">
-                              <div className="py-1">
-                                <button
-                                  onClick={() => {
-                                    exportToExcel(selectedGroup);
-                                    setIsExportDropdownOpen(false);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                                >
-                                  <svg className="w-4 h-4 mr-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                  </svg>
-                                  Export as Excel
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    copyToClipboard(selectedGroup);
-                                    setIsExportDropdownOpen(false);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                                >
-                                  <svg className="w-4 h-4 mr-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V9a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                  </svg>
-                                  Copy to Clipboard
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* Collapsible Group Summary */}
-                <div className="border-b bg-blue-50">
+                <div className="border-b bg-gray-50">
                   {/* Summary Toggle Bar */}
                   <div 
-                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-blue-100 transition-colors"
+                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100 transition-colors"
                     onClick={() => setIsSummaryCollapsed(!isSummaryCollapsed)}
                   >
-                    <h3 className="font-medium text-blue-900">Summary</h3>
-                    <svg 
-                      className={`w-5 h-5 text-blue-700 transition-transform ${isSummaryCollapsed ? 'rotate-180' : ''}`}
-                      fill="none" 
-                      stroke="currentColor" 
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                    <h3 className="font-medium text-gray-900">{selectedGroup.name}</h3>
+                    <div className="flex items-center gap-3">
+                      {/* Export Dropdown */}
+                      <div className="relative export-dropdown-container">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsExportDropdownOpen(!isExportDropdownOpen);
+                          }}
+                          className="btn-primary flex items-center"
+                        >
+                          Export
+                          <svg 
+                            className={`ml-2 w-4 h-4 transition-transform ${isExportDropdownOpen ? 'rotate-180' : ''}`}
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        
+                        {/* Dropdown Menu */}
+                        {isExportDropdownOpen && (
+                          <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border z-10">
+                            <div className="py-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  exportToExcel(selectedGroup);
+                                  setIsExportDropdownOpen(false);
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                              >
+                                <svg className="w-4 h-4 mr-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Export as Excel
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyToClipboard(selectedGroup);
+                                  setIsExportDropdownOpen(false);
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                              >
+                                <svg className="w-4 h-4 mr-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V9a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                                Copy to Clipboard
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <svg 
+                        className={`w-5 h-5 text-gray-500 transition-transform ${isSummaryCollapsed ? 'rotate-180' : ''}`}
+                        fill="none" 
+                        stroke="currentColor" 
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
                   </div>
                   
                   {/* Collapsible Summary Content */}
                   {!isSummaryCollapsed && (
-                    <div className="px-6 pb-6">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div className="px-6 py-6">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                         <div>
                           <span className="font-medium">Total Items:</span> {selectedGroup.structured_results?.total_items || 0}
                         </div>
@@ -437,9 +395,6 @@ function Groups() {
                         </div>
                         <div>
                           <span className="font-medium">Sub Groups:</span> {selectedGroup.structured_results?.total_sub_groups || 0}
-                        </div>
-                        <div>
-                          <span className="font-medium">Estimated Savings:</span> {selectedGroup.structured_results?.estimated_total_savings || '0%'}
                         </div>
                       </div>
                     </div>
@@ -450,37 +405,58 @@ function Groups() {
                 <div className="flex-1 overflow-y-auto p-6">
                   <div className="space-y-6">
                     {selectedGroup.structured_results?.main_groups?.map((mainGroup, mainIndex) => (
-                      <div key={mainIndex} className="border rounded-lg p-4">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4">
-                          Main Group: {mainGroup.name}
-                          <span className="text-sm font-normal text-gray-600 ml-2">
-                            ({mainGroup.total_items} items • {mainGroup.estimated_savings} savings)
-                          </span>
-                        </h4>
-                        
-                        {/* Sub Groups */}
-                        <div className="space-y-4 ml-4">
-                          {mainGroup.sub_groups?.map((subGroup, subIndex) => (
-                            <div key={subIndex} className="bg-gray-50 rounded-lg p-4">
-                              <h5 className="text-md font-medium text-gray-800 mb-3">
-                                Sub Group: {subGroup.name}
-                                <span className="text-sm font-normal text-gray-600 ml-2">
-                                  ({subGroup.total_items} items)
-                                </span>
-                              </h5>
-                              
-                              {/* Items */}
-                              <div className="space-y-2 ml-4">
-                                {subGroup.items?.map((item, itemIndex) => (
-                                  <div key={itemIndex} className="flex justify-between items-center py-1 border-b border-gray-200 last:border-b-0">
-                                    <span className="text-gray-700">- {item.name}</span>
-                                    <span className="text-sm font-medium text-blue-600">({item.count})</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
+                      <div key={mainIndex} className="border rounded-lg overflow-hidden">
+                        {/* Main Group Header - Collapsible */}
+                        <div 
+                          className="bg-gray-50 border-b cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => toggleMainGroup(mainIndex)}
+                        >
+                          <div className="flex items-center justify-between p-4">
+                            <h4 className="text-lg font-semibold text-gray-900">
+                              Main Group: {mainGroup.name}
+                              <span className="text-sm font-normal text-gray-600 ml-2">
+                                ({mainGroup.total_items} items)
+                              </span>
+                            </h4>
+                            <svg 
+                              className={`w-5 h-5 text-gray-500 transition-transform ${collapsedMainGroups[mainIndex] ? 'rotate-180' : ''}`}
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
                         </div>
+                        
+                        {/* Collapsible Sub Groups Content */}
+                        {!collapsedMainGroups[mainIndex] && (
+                          <div className="p-4">
+                            {/* Sub Groups */}
+                            <div className="space-y-4">
+                              {mainGroup.sub_groups?.map((subGroup, subIndex) => (
+                                <div key={subIndex} className="bg-gray-50 rounded-lg p-4">
+                                  <h5 className="text-md font-medium text-gray-800 mb-3">
+                                    Sub Group: {subGroup.name}
+                                    <span className="text-sm font-normal text-gray-600 ml-2">
+                                      ({subGroup.total_items} items)
+                                    </span>
+                                  </h5>
+                                  
+                                  {/* Items */}
+                                  <div className="space-y-2 ml-4">
+                                    {subGroup.items?.map((item, itemIndex) => (
+                                      <div key={itemIndex} className="flex justify-between items-center py-1 border-b border-gray-200 last:border-b-0">
+                                        <span className="text-gray-700">- {item.name}</span>
+                                        <span className="text-sm font-medium text-blue-600">({item.count})</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                     

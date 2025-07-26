@@ -27,7 +27,6 @@ function GroupManagement() {
   const [isLoadingFinalResults, setIsLoadingFinalResults] = useState(false);
   const [showSaveGroupModal, setShowSaveGroupModal] = useState(false);
   const [groupName, setGroupName] = useState('');
-  const [groupDescription, setGroupDescription] = useState('');
 
   // UI States
   const [selectedItems, setSelectedItems] = useState(new Set());
@@ -426,7 +425,6 @@ function GroupManagement() {
         },
         body: JSON.stringify({
           name: groupName.trim(),
-          description: groupDescription.trim(),
           structured_results: finalResults.structured_results || finalResults,
           file_id: fileId,
           created_at: new Date().toISOString()
@@ -438,7 +436,6 @@ function GroupManagement() {
         alert('Final results saved successfully! You can view it in the Saved Groups tab.');
         setShowSaveGroupModal(false);
         setGroupName('');
-        setGroupDescription('');
       } else {
         const error = await response.json();
         alert(`Error saving group: ${error.detail}`);
@@ -800,15 +797,14 @@ function GroupManagement() {
                         </div>
                         
                         <div className="flex space-x-2">
+                                                  <div className="flex items-center space-x-2 mt-2">
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                             {group.count || group.item_count || 0} records
                           </span>
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                             {(group.sub_groups || []).length} sub-groups
                           </span>
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            {group.estimated_savings || 'N/A'} savings
-                          </span>
+                        </div>
                         </div>
                       </div>
                       
@@ -1089,19 +1085,11 @@ function GroupManagement() {
               onChange={(e) => setGroupName(e.target.value)}
               className="w-full border rounded px-3 py-2 mb-4"
             />
-            <textarea
-              placeholder="Description (optional)"
-              value={groupDescription}
-              onChange={(e) => setGroupDescription(e.target.value)}
-              className="w-full border rounded px-3 py-2 mb-4"
-              rows="3"
-            />
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => {
                   setShowSaveGroupModal(false);
                   setGroupName('');
-                  setGroupDescription('');
                 }}
                 className="btn-secondary"
                 disabled={isSavingFinalResults}

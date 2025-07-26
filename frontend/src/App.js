@@ -210,22 +210,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pt-16">
-      {/* Page Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">CSV Processing Dashboard</h1>
-              <p className="text-gray-600">Upload and analyze CSV files with AI-powered bulk procurement optimization</p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 bg-green-400 rounded-full"></div>
-              <span className="text-sm text-gray-600">System Online</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
@@ -517,7 +501,7 @@ function App() {
                     {/* Summary Stats */}
                     {analysisData.summary && (
                       <div className="p-4 border-b bg-gray-50">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                           <div className="text-center">
                             <div className="text-2xl font-bold text-blue-600">{analysisData.summary.total_groups_created}</div>
                             <div className="text-xs text-gray-600">Groups Created</div>
@@ -525,10 +509,6 @@ function App() {
                           <div className="text-center">
                             <div className="text-2xl font-bold text-green-600">{analysisData.summary.items_grouped}</div>
                             <div className="text-xs text-gray-600">Items Grouped</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-2xl font-bold text-purple-600">{analysisData.summary.estimated_total_savings}</div>
-                            <div className="text-xs text-gray-600">Est. Savings</div>
                           </div>
                           <div className="text-center">
                             <div className="text-2xl font-bold text-orange-600">{analysisData.summary.items_ungrouped}</div>
@@ -550,9 +530,6 @@ function App() {
                                 <div className="flex items-center space-x-4 mt-2">
                                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                     {group.item_ids?.length} items
-                                  </span>
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                    {group.estimated_savings_potential} savings
                                   </span>
                                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                                     {group.bulk_metric}
